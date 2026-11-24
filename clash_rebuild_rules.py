@@ -8,7 +8,6 @@
 对每个远程订阅同时写入两个增强文件（profiles/<uid>.yaml）：
   1. 合并(Merge)增强:
      - rule-providers: 指向 Loyalsoldier/clash-rules 在线规则集（自动更新，interval=86400s）
-     - dns.nameserver-policy: 强制 Bing 相关域名走国内 DNS（避免被订阅 fallback-filter 的 gfw 清单劫持到境外 IP）
      - 保留 Merge 文件中用户原有的其它配置项（如 tun/profile/sniffer 等），并移除旧版遗留的 rules 字段
   2. 规则(Rules)增强（即 Clash Verge 右键订阅 ->「编辑规则」所读写的配置）:
      - prepend: 完整的分流规则（含 Bing 国内直连、防误杀、RULE-SET、结尾 MATCH 兜底）
@@ -16,7 +15,7 @@
 
 为什么拆成 Merge + Rules 增强
 -----------------------------
-- Merge 负责提供 rule-providers 和 DNS 策略；不在 Merge 里写 rules，避免覆盖「编辑规则」面板。
+- Merge 只负责提供 rule-providers；不在 Merge 里写 rules（避免覆盖「编辑规则」面板），也不写 dns（避免与 Clash Verge 的 DNS 覆盖 / AuthoritativeFields 冲突而被丢弃弹窗警告）。
 - Rules 增强的 prepend 在订阅规则之前生效，且 Clash Verge 的「右键 -> 编辑规则」直接读取该文件（并关联 Merge 中的 rule-providers），因此所有规则在界面内直接可见、可随时增删改。
 
 安全性
@@ -66,14 +65,6 @@ PROVIDERS = [
     ('cncidr',  'cncidr.txt',  'ipcidr'),   # 中国大陆 IP
 ]
 
-# Bing 国内直连所需强制国内解析的域名（防止订阅 dns.fallback-filter 的 geosite:gfw 把必应解析到海外）
-BING_DOMESTIC_DNS = ['223.5.5.5', '119.29.29.29']
-BING_DNS_POLICIES = {
-    '+.bing.com': BING_DOMESTIC_DNS,
-    '+.bing.net': BING_DOMESTIC_DNS,
-    '+.bingapis.com': BING_DOMESTIC_DNS,
-}
-
 # 完整规则，第一命中生效。{group} 替换成各订阅自己的主代理组名。
 RULE_TEMPLATES = [
     'RULE-SET,private,DIRECT',
@@ -93,7 +84,7 @@ RULE_TEMPLATES = [
     'RULE-SET,proxy,{group}',                # 海外服务走代理（Claude/OpenAI/GitHub/Cursor 等，免本地 DNS 解析）
     'RULE-SET,lancidr,DIRECT,no-resolve',
     'RULE-SET,cncidr,DIRECT,no-resolve',
-    'GEOIP,PRIVATE,DIRECT',                  # 解析为私网 IP 的内网域名直连兜底
+    'GEOIP,LAN,DIRECT',                      # 解析为私网 IP 的内网域名直连兜底（Mihomo 内置特判 lan，兼容 MMDB/geodata）
     'GEOIP,CN,DIRECT',
     'MATCH,{group}',                         # 其余全部走代理（兜底）
 ]
@@ -188,10 +179,27 @@ def inspect_subscription(sub_yaml_path, selected_items):
 
 
 def build_merge_cfg(existing_merge, base_url, provider_proxy):
-    """基于现有 Merge 配置保留自定义字段，更新 rule-providers 与 Bing DNS，并移除覆盖面板的 rules。"""
+    """基于现有 Merge 配置保留自定义字段，写入 rule-providers，并清理旧版遗留的 rules / Bing DNS。"""
     cfg = dict(existing_merge or {})
     # 移除 Merge 中的 rules，避免覆盖右键「编辑规则」面板（Rules 增强）
     cfg.pop('rules', None)
+
+    # 清理旧版脚本写入 Merge 的 Bing nameserver-policy（避免被 Clash Verge DNS 覆盖丢弃并弹警告）
+    if isinstance(cfg.get('dns'), dict):
+        dns_cfg = dict(cfg['dns'])
+        if isinstance(dns_cfg.get('nameserver-policy'), dict):
+            ns_policy = dict(dns_cfg['nameserver-policy'])
+            for k in ('+.bing.com', '+.bing.net', '+.bingapis.com'):
+                if ns_policy.get(k) == ['223.5.5.5', '119.29.29.29']:
+                    ns_policy.pop(k, None)
+            if ns_policy:
+                dns_cfg['nameserver-policy'] = ns_policy
+            else:
+                dns_cfg.pop('nameserver-policy', None)
+        if dns_cfg:
+            cfg['dns'] = dns_cfg
+        else:
+            cfg.pop('dns', None)
 
     providers = dict(cfg.get('rule-providers') or {}) if isinstance(cfg.get('rule-providers'), dict) else {}
     for name, fname, behavior in PROVIDERS:
@@ -207,13 +215,6 @@ def build_merge_cfg(existing_merge, base_url, provider_proxy):
             p['proxy'] = provider_proxy
         providers[name] = p
     cfg['rule-providers'] = providers
-
-    dns_cfg = dict(cfg.get('dns') or {}) if isinstance(cfg.get('dns'), dict) else {}
-    ns_policy = dict(dns_cfg.get('nameserver-policy') or {}) if isinstance(dns_cfg.get('nameserver-policy'), dict) else {}
-    for domain_pat, servers in BING_DNS_POLICIES.items():
-        ns_policy[domain_pat] = list(servers)
-    dns_cfg['nameserver-policy'] = ns_policy
-    cfg['dns'] = dns_cfg
 
     return cfg
 
@@ -342,15 +343,15 @@ def main():
             continue
 
         print('  主代理组: %s' % group)
-        print('  Merge 文件 (rule-providers + Bing DNS): %s' % merge_path)
-        print('  Rules 文件 (右键「编辑规则」可见):       %s（屏蔽原订阅规则 %d 条）' % (rules_path, len(sub_rules)))
+        print('  Merge 文件 (rule-providers):       %s' % merge_path)
+        print('  Rules 文件 (右键「编辑规则」可见): %s（屏蔽原订阅规则 %d 条）' % (rules_path, len(sub_rules)))
 
         provider_proxy = None if args.no_proxy_download else group
         existing_merge = load_yaml_dict(merge_path)
         merge_cfg = build_merge_cfg(existing_merge, base_url, provider_proxy)
         rules_cfg = build_rules_cfg(group, sub_rules)
 
-        merge_text = dump_yaml_with_header(merge_cfg, '由 clash_rebuild_rules.py 生成：rule-providers 与 Bing 国内 DNS 策略')
+        merge_text = dump_yaml_with_header(merge_cfg, '由 clash_rebuild_rules.py 生成：rule-providers 规则集数据源')
         rules_text = dump_yaml_with_header(rules_cfg, '由 clash_rebuild_rules.py 生成：右键「编辑规则」前置分流规则')
 
         if args.dry_run:

@@ -4,12 +4,12 @@
 
 ## 功能特点
 
-- **原生可视化编辑**：将配置拆分为 **Merge 增强**（提供 `rule-providers` 与 DNS 策略）与 **Rules 增强**（写入 `prepend` 前置规则并用 `delete` 屏蔽机场原规则），右键订阅点击「编辑规则」即可直接看到全部生效规则并随时增删改。
+- **原生可视化编辑**：将配置拆分为 **Merge 增强**（仅提供 `rule-providers`，不触碰 `rules` 和 `dns`，避免覆盖面板或与 Clash Verge 的 DNS 覆盖冲突）与 **Rules 增强**（写入 `prepend` 前置规则并用 `delete` 屏蔽机场原规则），右键订阅点击「编辑规则」即可直接看到全部生效规则并随时增删改。
 - **规则集每日自动更新**：基于 Mihomo / Clash 原生 `rule-providers`（`interval: 86400`），机场订阅更新不会覆盖自定义分流逻辑。
-- **Bing 国内直连 + 防 DNS 劫持**：精确放行 `bing.com` / `bing.net` / `bingapis.com` / `bingj.com` 直连，并在 Merge 中注入 `dns.nameserver-policy` 强制走国内 DNS（`223.5.5.5` / `119.29.29.29`），避免被机场订阅 `fallback-filter`（`geosite: gfw`）解析到境外必应。
+- **Bing 国内直连**：精确放行 `bing.com` / `bing.net` / `bingapis.com` / `bingj.com` 直连（置于 `reject` 之后保留广告拦截，置于 `gfw`/`proxy` 之前防止走代理）。
 - **修正黑白名单交叉误伤**：
   - 采用 `gfw → direct → proxy` 顺序：既保证被墙域名走代理，又避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名。
-  - 在 `reject` 广告拦截前精确放行 `gvt2.com`（Chrome/Google 组件更新）与 `statsig.anthropic.com`（Claude 功能开关），补齐 `gstatic.cn` 走代理与 `GEOIP,PRIVATE,DIRECT` 内网兜底。
+  - 在 `reject` 广告拦截前精确放行 `gvt2.com`（Chrome/Google 组件更新）与 `statsig.anthropic.com`（Claude 功能开关），补齐 `gstatic.cn` 走代理与 `GEOIP,LAN,DIRECT` 内网域名兜底。
 - **安全可逆**：保留 Merge 文件中用户原有的自定义字段（如 `tun`、`sniffer`、`profile` 等）；首次修改自动生成 `.bak` 备份，支持 `--dry-run` 预览与 `--restore` 一键还原。
 
 ## 环境依赖
@@ -51,7 +51,9 @@ python clash_rebuild_rules.py --restore
 2. 在「订阅」页 **右键订阅 →「编辑规则」**：
    - 顶部无删除线的 **20 条规则** 即为当前生效的完整分流规则；
    - 下方带**红色删除线**的条目是已被屏蔽的机场自带旧规则，运行时不会加载、也不会生效。
-3. **Bing 国内版提示**：若浏览器此前挂代理访问过必应并缓存了国际版 Cookie，首次切回直连时访问一次 `https://cn.bing.com`（或清除浏览器中 `bing.com` 的 Cookie），后续地址栏默认搜索即可稳定使用国内版必应。
+3. **Bing 国内版提示**：
+   - 若浏览器此前挂代理访问过必应并缓存了国际版 Cookie，首次切回直连时访问一次 `https://cn.bing.com`（或清除浏览器中 `bing.com` 的 Cookie），后续地址栏默认搜索即可稳定使用国内版必应。
+   - 若需要为 Bing 指定上游 DNS（如在开启了「DNS 覆盖」且主 `nameserver` 含海外 DNS 时），请在 Clash Verge 的 **「设置 → DNS 覆盖」** 面板内配置 `nameserver-policy`，不要写在 Merge 中（否则会被 `AuthoritativeFields` 丢弃）。
 
 ## 分流规则匹配顺序
 
@@ -70,7 +72,7 @@ Clash 按从上到下顺序匹配，**命中第一条即停止**（`{group}` 自
 | 14 | `RULE-SET,direct` | `DIRECT` | 国内网站与微软 / 游戏 / 驱动下载 CDN 直连 |
 | 15 | `RULE-SET,proxy` | `{group}` | 海外常见服务走代理（Claude / OpenAI / GitHub / Cursor 等） |
 | 16–17 | `RULE-SET,lancidr` / `RULE-SET,cncidr` (`no-resolve`) | `DIRECT` | 局域网与中国大陆 IP 段直连（免 DNS 解析） |
-| 18–19 | `GEOIP,PRIVATE` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
+| 18–19 | `GEOIP,LAN` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
 | 20 | `MATCH` | `{group}` | 其余未命中流量默认走主代理组兜底 |
 
 ## 仓库文件说明
