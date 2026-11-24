@@ -5,7 +5,7 @@
 ## 功能特点
 
 - **原生可视化编辑**：将配置拆分为 **Merge 增强**（仅提供 `rule-providers`，不触碰 `rules` 和 `dns`，避免覆盖面板或与 Clash Verge 的 DNS 覆盖冲突）与 **Rules 增强**（写入 `prepend` 前置规则并用 `delete` 屏蔽机场原规则），右键订阅点击「编辑规则」即可直接看到全部生效规则并随时增删改。
-- **规则集每日自动更新**：基于 Mihomo / Clash 原生 `rule-providers`（`interval: 86400`），机场订阅更新不会覆盖自定义分流逻辑。
+- **规则集预拉取进度条 & 双规则源可选**：基于 Mihomo / Clash 原生 `rule-providers`（`interval: 86400`），应用配置时默认将全部 10 份规则集预先拉取到 Clash Verge 的 `ruleset/` 本地缓存并显示终端动态进度条（支持 `--skip-download` 跳过，避免首次冷启动拉取失败）；默认使用 `Loyalsoldier/clash-rules`（YAML 文本，便于直接打开排查），也支持通过 `--source metacubex` 切换为官方 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat) 二进制 `.mrs` 规则集（体积约 820 KB，启动解析更快、内存占用更低）。
 - **Bing 国内直连**：精确放行 `bing.com` / `bing.net` / `bingapis.com` / `bingj.com` 直连（置于 `reject` 之后保留广告拦截，置于 `gfw`/`proxy` 之前防止走代理）。
 - **修正黑白名单交叉误伤**：
   - 采用 `gfw → direct → proxy` 顺序：既保证被墙域名走代理，又避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名。
@@ -29,14 +29,20 @@ pip install pyyaml
 # 1. 预览将要写入的配置（推荐先跑，不修改任何文件）
 python clash_rebuild_rules.py --dry-run
 
-# 2. 正式写入所有远程订阅的 Merge 与 Rules 增强配置
+# 2. 正式写入所有远程订阅的 Merge 与 Rules 增强配置（默认带进度条预拉取全部规则集到本地缓存）
 python clash_rebuild_rules.py
+
+# 可选：只写入配置文件，不预先拉取规则集（交由 Clash Verge 后台自行拉取）
+python clash_rebuild_rules.py --skip-download
 
 # 可选：仅处理指定订阅（按名称/uid 匹配，可重复指定）或手动指定目标主代理组
 python clash_rebuild_rules.py --profile "订阅名称" --group "节点选择"
 
 # 可选：重置 Rules 增强为模板默认规则（不保留界面中手工新增的自定义规则）
 python clash_rebuild_rules.py --reset-rules
+
+# 可选：切换为 MetaCubeX 二进制 .mrs 规则集（体积更小、低内存，需 Mihomo 内核；可与 --cdn jsdelivr 组合）
+python clash_rebuild_rules.py --source metacubex
 
 # 可选：使用 jsDelivr CDN 镜像拉取规则集
 python clash_rebuild_rules.py --cdn jsdelivr
