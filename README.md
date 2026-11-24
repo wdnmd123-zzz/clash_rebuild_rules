@@ -14,8 +14,8 @@
 
 ## 环境依赖
 
-- Python 3.7+
-- `PyYAML`：
+- **Windows 免安装独立版 (`clash_rebuild_rules.bat`)**：**无需安装 Python 或任何第三方库**，依赖 Windows 10/11 自带 PowerShell，双击即可打开交互菜单使用。
+- **跨平台 Python 版 (`clash_rebuild_rules.py`)**：Python 3.7+ 与 `PyYAML`（支持 Windows / macOS / Linux）：
 
 ```bash
 pip install pyyaml
@@ -24,6 +24,24 @@ pip install pyyaml
 支持自动识别 Windows（`%APPDATA%`）、macOS（`~/Library/Application Support`）与 Linux（`~/.local/share` / `~/.config`）下的 Clash Verge Rev / Clash Verge 配置目录。
 
 ## 使用方法
+
+### 方式一：Windows 双击交互菜单（免安装 Python）
+
+直接双击运行 `clash_rebuild_rules.bat`，按数字 `1`–`10` 选择对应功能即可（与下方 Python 版命令一一对应，需要订阅名/代理组/目录等参数时会在选中后提示输入）：
+
+- `[1]` 预览配置（`--dry-run`）
+- `[2]` 正式写入并预拉取规则集（默认应用）
+- `[3]` 仅写入配置，不预拉取规则集（`--skip-download`）
+- `[4]` 指定订阅 / 指定主代理组（`--profile` / `--group`）
+- `[5]` 重置规则为默认模板（`--reset-rules`）
+- `[6]` 使用 MetaCubeX 二进制 `.mrs` 源（`--source metacubex`，选中后可选是否配合 jsDelivr）
+- `[7]` 使用 jsDelivr CDN 镜像拉取（`--cdn jsdelivr`）
+- `[8]` 下载规则集不走代理（`--no-proxy-download`）
+- `[9]` 手动指定配置目录（`--dir`）
+- `[10]` 还原 `.bak` 备份（`--restore`，选中后可选先预览或正式还原）
+- 同样支持在命令行直接带参数运行（如 `clash_rebuild_rules.bat --dry-run`、`clash_rebuild_rules.bat --restore`）。
+
+### 方式二：Python 命令行版
 
 ```bash
 # 1. 预览将要写入的配置（推荐先跑，不修改任何文件）
@@ -89,4 +107,5 @@ Clash 按从上到下顺序匹配，**命中第一条即停止**（`{group}` 自
 
 ## 仓库文件说明
 
-- `clash_rebuild_rules.py`：主脚本，基于规则集整套重建分流规则并配置 Merge + Rules 增强。
+- `clash_rebuild_rules.bat`：Windows 免 Python 独立版（内置 YAML 解析与交互式功能菜单，双击即用，也兼容命令行参数）。
+- `clash_rebuild_rules.py`：跨平台 Python 主脚本，基于规则集整套重建分流规则并配置 Merge + Rules 增强。
