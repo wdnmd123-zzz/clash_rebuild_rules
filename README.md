@@ -10,7 +10,7 @@
 - **修正黑白名单交叉误伤**：
   - 采用 `gfw → direct → proxy` 顺序：既保证被墙域名走代理，又避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名。
   - 在 `reject` 广告拦截前精确放行 `gvt2.com`（Chrome/Google 组件更新）与 `statsig.anthropic.com`（Claude 功能开关），补齐 `gstatic.cn` 走代理与 `GEOIP,LAN,DIRECT` 内网域名兜底。
-- **安全可逆**：保留 Merge 文件中用户原有的自定义字段（如 `tun`、`sniffer`、`profile` 等）；首次修改自动生成 `.bak` 备份，支持 `--dry-run` 预览与 `--restore` 一键还原。
+- **安全可逆**：保留 Merge 文件中用户原有的自定义字段（如 `tun`、`sniffer`、`profile` 等）；重跑时自动保留你在「编辑规则」界面中手工新增的自定义规则（加 `--reset-rules` 可重置）；兼容 ACL4SSR 等多分组订阅自动识别主代理组；首次修改自动生成 `.bak` 备份，支持 `--dry-run` 预览与 `--restore` 一键还原。
 
 ## 环境依赖
 
@@ -31,6 +31,12 @@ python clash_rebuild_rules.py --dry-run
 
 # 2. 正式写入所有远程订阅的 Merge 与 Rules 增强配置
 python clash_rebuild_rules.py
+
+# 可选：仅处理指定订阅（按名称/uid 匹配，可重复指定）或手动指定目标主代理组
+python clash_rebuild_rules.py --profile "订阅名称" --group "节点选择"
+
+# 可选：重置 Rules 增强为模板默认规则（不保留界面中手工新增的自定义规则）
+python clash_rebuild_rules.py --reset-rules
 
 # 可选：使用 jsDelivr CDN 镜像拉取规则集
 python clash_rebuild_rules.py --cdn jsdelivr

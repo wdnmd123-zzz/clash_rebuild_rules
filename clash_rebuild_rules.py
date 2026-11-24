@@ -10,7 +10,7 @@
      - rule-providers: 指向 Loyalsoldier/clash-rules 在线规则集（自动更新，interval=86400s）
      - 保留 Merge 文件中用户原有的其它配置项（如 tun/profile/sniffer 等），并移除旧版遗留的 rules 字段
   2. 规则(Rules)增强（即 Clash Verge 右键订阅 ->「编辑规则」所读写的配置）:
-     - prepend: 完整的分流规则（含 Bing 国内直连、防误杀、RULE-SET、结尾 MATCH 兜底）
+     - prepend: 完整的分流规则（含 Bing 国内直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
      - delete:  标记删除订阅自带的旧规则（界面上显示删除线，运行时不再冗余保留）
 
 为什么拆成 Merge + Rules 增强
@@ -29,6 +29,9 @@
 ----
   python clash_rebuild_rules.py --dry-run            # 预览（推荐先跑）
   python clash_rebuild_rules.py                      # 应用
+  python clash_rebuild_rules.py --profile 订阅名      # 仅处理指定订阅（可重复指定）
+  python clash_rebuild_rules.py --group 节点选择      # 手动指定目标主代理组名
+  python clash_rebuild_rules.py --reset-rules        # 重置 Rules 增强，不保留界面手工新增规则
   python clash_rebuild_rules.py --cdn jsdelivr       # 用 jsdelivr 镜像(国内多数可直连)
   python clash_rebuild_rules.py --no-proxy-download  # 规则下载不走代理(境外网络用)
   python clash_rebuild_rules.py --restore            # 用 .bak 还原所有订阅
@@ -139,43 +142,111 @@ def load_yaml_dict(path):
         return {}
 
 
+def _rule_key(rule):
+    parts = [p.strip() for p in str(rule).split(',')]
+    if not parts:
+        return ''
+    rtype = parts[0].upper()
+    if rtype in ('MATCH', 'FINAL'):
+        return rtype
+    if len(parts) >= 2:
+        return rtype + ',' + parts[1].lower()
+    return rtype
+
+
+MANAGED_PROVIDER_NAMES = {name for name, _, _ in PROVIDERS}
+MANAGED_RULE_KEYS = {_rule_key(t) for t in RULE_TEMPLATES} | {'MATCH', 'FINAL'}
+
+
+def _is_direct_or_reject_group(group_obj):
+    proxies = group_obj.get('proxies') or []
+    return bool(proxies) and isinstance(proxies[0], str) and proxies[0].strip().upper() in ('DIRECT', 'REJECT')
+
+
+def _is_managed_rules(existing_rules):
+    """判断现有 Rules 增强文件是否已由本脚本生成过（不依赖易被 UI 剥离的注释）。"""
+    prepend = existing_rules.get('prepend') if isinstance(existing_rules, dict) else None
+    if not isinstance(prepend, list):
+        return False
+    matched = 0
+    for r in prepend:
+        if not isinstance(r, str):
+            continue
+        parts = [p.strip() for p in r.split(',')]
+        if len(parts) >= 2 and parts[0].upper() == 'RULE-SET' and parts[1] in MANAGED_PROVIDER_NAMES:
+            matched += 1
+            if matched >= 2:
+                return True
+    return False
+
+
 def inspect_subscription(sub_yaml_path, selected_items):
-    """读取订阅配置，返回 (主代理组名, 去重后的原始规则列表)。"""
+    """读取订阅配置，返回 (推荐主代理组名, 去重后的原始规则列表, 全部有效代理组名列表)。"""
     cfg = load_yaml_dict(sub_yaml_path)
     raw_groups = cfg.get('proxy-groups') or []
     valid_groups = []
-    first_select = None
+    group_map = {}
+    group_idx = {}
+    proxy_selects = []
+    any_selects = []
     for g in raw_groups:
         if isinstance(g, dict) and isinstance(g.get('name'), str) and g['name'].strip():
             gname = g['name']
+            if gname in group_map:
+                continue
+            group_idx[gname] = len(valid_groups)
             valid_groups.append(gname)
-            if first_select is None and g.get('type') == 'select' and gname.upper() not in ('DIRECT', 'REJECT'):
-                first_select = gname
+            group_map[gname] = g
+            if g.get('type') == 'select' and gname.upper() not in ('DIRECT', 'REJECT'):
+                any_selects.append(gname)
+                if not _is_direct_or_reject_group(g):
+                    proxy_selects.append(gname)
     valid_set = set(valid_groups)
+    proxy_select_set = set(proxy_selects)
 
     raw_rules = [r for r in (cfg.get('rules') or []) if isinstance(r, str) and r.strip()]
     dedup_rules = list(dict.fromkeys(raw_rules))
 
-    # 1. 优先从订阅自带的末尾 MATCH / FINAL 规则提取主代理组
+    # 1. 从末尾 MATCH / FINAL 提取目标组；若其指向「漏网之鱼」等兜底组（引用了更靠前的 select 主组），则自动解包到主代理组
     for r in reversed(dedup_rules):
         parts = [p.strip() for p in r.split(',')]
         if len(parts) >= 2 and parts[0].upper() in ('MATCH', 'FINAL'):
             cand = parts[1]
             if cand in valid_set and cand.upper() not in ('DIRECT', 'REJECT'):
-                return cand, dedup_rules
+                visited = {cand}
+                while group_map[cand].get('type') == 'select':
+                    earlier = None
+                    for ref in (group_map[cand].get('proxies') or []):
+                        if (
+                            isinstance(ref, str)
+                            and ref in proxy_select_set
+                            and ref not in visited
+                            and group_idx[ref] < group_idx[cand]
+                        ):
+                            earlier = ref
+                            break
+                    if not earlier:
+                        break
+                    visited.add(earlier)
+                    cand = earlier
+                if not (_is_direct_or_reject_group(group_map[cand]) and proxy_selects):
+                    return cand, dedup_rules, valid_groups
+            break
 
-    # 2. 退回订阅中第一个 type=select 的代理组
-    if first_select:
-        return first_select, dedup_rules
+    # 2. 退回订阅中第一个非 DIRECT/REJECT 优先的 type=select 代理组，其次任意 select 组
+    if proxy_selects:
+        return proxy_selects[0], dedup_rules, valid_groups
+    if any_selects:
+        return any_selects[0], dedup_rules, valid_groups
 
     # 3. 若订阅文件不存在或未解析出 proxy-groups，再尝试 profiles.yaml 的 selected
     for sel in (selected_items or []):
         if isinstance(sel, dict) and isinstance(sel.get('name'), str):
             cand = sel['name']
             if (not valid_set or cand in valid_set) and cand.upper() not in ('DIRECT', 'REJECT'):
-                return cand, dedup_rules
+                return cand, dedup_rules, valid_groups
 
-    return None, dedup_rules
+    return None, dedup_rules, valid_groups
 
 
 def build_merge_cfg(existing_merge, base_url, provider_proxy):
@@ -219,12 +290,32 @@ def build_merge_cfg(existing_merge, base_url, provider_proxy):
     return cfg
 
 
-def build_rules_cfg(group, sub_rules):
+def build_rules_cfg(group, sub_rules, existing_rules=None, reset_rules=False):
+    managed_prepend = [t.format(group=group) for t in RULE_TEMPLATES]
+    custom_prepend = []
+    custom_append = []
+    if not reset_rules and _is_managed_rules(existing_rules):
+        seen_prepend = set()
+        for r in (existing_rules.get('prepend') or []):
+            if not isinstance(r, str) or not r.strip():
+                continue
+            if _rule_key(r) in MANAGED_RULE_KEYS:
+                continue
+            if r not in seen_prepend:
+                seen_prepend.add(r)
+                custom_prepend.append(r)
+        seen_append = set()
+        for r in (existing_rules.get('append') or []):
+            if not isinstance(r, str) or not r.strip():
+                continue
+            if r not in seen_append:
+                seen_append.add(r)
+                custom_append.append(r)
     return {
-        'prepend': [t.format(group=group) for t in RULE_TEMPLATES],
-        'append': [],
+        'prepend': custom_prepend + managed_prepend,
+        'append': custom_append,
         'delete': list(sub_rules),
-    }
+    }, len(custom_prepend) + len(custom_append)
 
 
 def dump_yaml_with_header(cfg, title_line):
@@ -272,6 +363,12 @@ def main():
     ap = argparse.ArgumentParser(description='整套重建 Clash Verge 所有订阅的分流规则（支持右键编辑规则查看）')
     ap.add_argument('--dir', help='Clash Verge 配置目录（默认自动找 %%APPDATA%% 下）')
     ap.add_argument('--dry-run', action='store_true', help='只预览，不写入')
+    ap.add_argument('--profile', action='append',
+                    help='仅处理指定订阅（按订阅名称、uid 或文件名匹配，可重复指定）')
+    ap.add_argument('--group',
+                    help='手动指定主代理组名（覆盖自动识别；多订阅组名不同时建议配合 --profile 使用）')
+    ap.add_argument('--reset-rules', action='store_true',
+                    help='重置 Rules 增强为模板默认规则，不保留此前在界面中手工新增的自定义规则')
     ap.add_argument('--cdn', choices=['raw', 'jsdelivr'], default='raw',
                     help='规则下载源：raw=GitHub 原始地址(默认)，jsdelivr=国内 CDN 镜像')
     ap.add_argument('--no-proxy-download', action='store_true',
@@ -293,6 +390,23 @@ def main():
     if not remotes:
         print('profiles.yaml 里没有 type: remote 的订阅。')
         return
+
+    if args.profile:
+        wanted = set(args.profile)
+        matched_remotes = [
+            it for it in remotes
+            if it.get('name') in wanted or it.get('uid') in wanted or it.get('file') in wanted
+        ]
+        if not matched_remotes:
+            avail = ', '.join(str(it.get('name') or it.get('uid') or '?') for it in remotes)
+            sys.exit('未匹配到指定订阅（%s）。可用远程订阅: %s' % (', '.join(args.profile), avail))
+        found_keys = set()
+        for it in matched_remotes:
+            found_keys.update(k for k in (it.get('name'), it.get('uid'), it.get('file')) if k)
+        missing = [p for p in args.profile if p not in found_keys]
+        if missing:
+            print('[warn] 未找到以下订阅，已忽略: %s\n' % ', '.join(missing))
+        remotes = matched_remotes
 
     base_url = CDN_BASE if args.cdn == 'jsdelivr' else RAW_BASE
     if not args.restore:
@@ -333,23 +447,41 @@ def main():
             prev = seen_merge.get(merge_uid) or seen_rules.get(rules_uid)
             print('  [warn] 与订阅「%s」共用增强文件，跳过以防互相覆盖。\n' % prev)
             continue
-        seen_merge[merge_uid] = name
-        seen_rules[rules_uid] = name
 
         sub_path = os.path.join(profiles_dir, sub_file) if sub_file else ''
-        group, sub_rules = inspect_subscription(sub_path, it.get('selected'))
+        detected_group, sub_rules, valid_groups = inspect_subscription(sub_path, it.get('selected'))
+        if args.group is not None:
+            if not args.group.strip() or args.group.strip().upper() in ('DIRECT', 'REJECT'):
+                print('  [warn] --group 不能指定为空或 %s，跳过。\n' % (args.group or '空'))
+                continue
+            if valid_groups and args.group not in valid_groups:
+                avail_groups = ', '.join(valid_groups[:8]) + (' ...' if len(valid_groups) > 8 else '')
+                print('  [warn] 该订阅中不存在代理组「%s」（可用: %s），跳过。\n' % (args.group, avail_groups))
+                continue
+            group = args.group
+        else:
+            group = detected_group
+
         if not group:
             print('  [warn] 无法确定该订阅的有效主代理组名，跳过。\n')
             continue
 
-        print('  主代理组: %s' % group)
+        seen_merge[merge_uid] = name
+        seen_rules[rules_uid] = name
+
+        print('  主代理组: %s%s' % (group, '（--group 指定）' if args.group is not None else ''))
         print('  Merge 文件 (rule-providers):       %s' % merge_path)
         print('  Rules 文件 (右键「编辑规则」可见): %s（屏蔽原订阅规则 %d 条）' % (rules_path, len(sub_rules)))
 
         provider_proxy = None if args.no_proxy_download else group
         existing_merge = load_yaml_dict(merge_path)
+        existing_rules = load_yaml_dict(rules_path)
         merge_cfg = build_merge_cfg(existing_merge, base_url, provider_proxy)
-        rules_cfg = build_rules_cfg(group, sub_rules)
+        rules_cfg, kept_custom = build_rules_cfg(
+            group, sub_rules, existing_rules=existing_rules, reset_rules=args.reset_rules
+        )
+        if kept_custom:
+            print('  已保留界面自定义规则: %d 条（位于模板规则之前，可加 --reset-rules 重置）' % kept_custom)
 
         merge_text = dump_yaml_with_header(merge_cfg, '由 clash_rebuild_rules.py 生成：rule-providers 规则集数据源')
         rules_text = dump_yaml_with_header(rules_cfg, '由 clash_rebuild_rules.py 生成：右键「编辑规则」前置分流规则')
@@ -359,7 +491,11 @@ def main():
             for line in merge_text.rstrip('\n').splitlines():
                 print('  | ' + line)
             print('  ----- Rules (prepend 预览，delete 共 %d 条已省略) -----' % len(sub_rules))
-            preview_rules = {'prepend': rules_cfg['prepend'], 'append': [], 'delete': ['<共 %d 条原订阅规则>' % len(sub_rules)]}
+            preview_rules = {
+                'prepend': rules_cfg['prepend'],
+                'append': rules_cfg['append'],
+                'delete': ['<共 %d 条原订阅规则>' % len(sub_rules)],
+            }
             for line in dump_yaml_with_header(preview_rules, '右键「编辑规则」预览').rstrip('\n').splitlines():
                 print('  | ' + line)
             print()
