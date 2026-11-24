@@ -78,4 +78,3 @@ Clash 按从上到下顺序匹配，**命中第一条即停止**（`{group}` 自
 ## 仓库文件说明
 
 - `clash_rebuild_rules.py`：主脚本，基于规则集整套重建分流规则并配置 Merge + Rules 增强。
-- `clash_add_google_rules.py`：早期轻量脚本（仅向订阅 `prepend` 增量追加 Google / OpenAI / Claude / Bing 规则，暂保留备用）。
