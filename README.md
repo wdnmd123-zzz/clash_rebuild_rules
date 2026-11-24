@@ -10,7 +10,7 @@
 - **修正黑白名单交叉误伤**：
   - 采用 `gfw → direct → proxy` 顺序：既保证被墙域名走代理，又避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名。
   - 在 `reject` 广告拦截前精确放行 `gvt2.com`（Chrome/Google 组件更新）与 `statsig.anthropic.com`（Claude 功能开关），补齐 `gstatic.cn` 走代理与 `GEOIP,LAN,DIRECT` 内网域名兜底。
-- **安全可逆**：保留 Merge 文件中用户原有的自定义字段（如 `tun`、`sniffer`、`profile` 等）；重跑时自动保留你在「编辑规则」界面中手工新增的自定义规则（加 `--reset-rules` 可重置）；兼容 ACL4SSR 等多分组订阅自动识别主代理组；首次修改自动生成 `.bak` 备份，支持 `--dry-run` 预览与 `--restore` 一键还原。
+- **安全可逆**：保留 Merge 文件中用户原有的自定义字段（如 `tun`、`sniffer`、`profile` 等）；重跑时自动保留你在「编辑规则」界面中手工新增的自定义规则（加 `--reset-rules` 可重置）；兼容 ACL4SSR 等多分组订阅自动识别主代理组；首次修改自动生成 `.bak` 备份，支持 `--restore` 一键还原。
 
 ## 环境依赖
 
@@ -27,28 +27,27 @@ pip install pyyaml
 
 ### 方式一：Windows 双击交互菜单（免安装 Python）
 
-直接双击运行 `clash_rebuild_rules.bat`，按数字 `1`–`10` 选择对应功能即可（与下方 Python 版命令一一对应，需要订阅名/代理组/目录等参数时会在选中后提示输入）：
+直接双击运行 `clash_rebuild_rules.bat`，按数字 `1`–`9` 选择对应功能即可（与下方 Python 版命令一一对应，需要订阅名/代理组/目录等参数时会在选中后提示输入）：
 
-- `[1]` 预览配置（`--dry-run`）
-- `[2]` 正式写入并预拉取规则集（默认应用）
+- `[1]` 正式写入并预拉取规则集（默认应用）
+- `[2]` 使用 MetaCubeX 二进制 `.mrs` 源（`--source metacubex`，选中后可选是否配合 jsDelivr）
 - `[3]` 仅写入配置，不预拉取规则集（`--skip-download`）
 - `[4]` 指定订阅 / 指定主代理组（`--profile` / `--group`）
 - `[5]` 重置规则为默认模板（`--reset-rules`）
-- `[6]` 使用 MetaCubeX 二进制 `.mrs` 源（`--source metacubex`，选中后可选是否配合 jsDelivr）
-- `[7]` 使用 jsDelivr CDN 镜像拉取（`--cdn jsdelivr`）
-- `[8]` 下载规则集不走代理（`--no-proxy-download`）
-- `[9]` 手动指定配置目录（`--dir`）
-- `[10]` 还原 `.bak` 备份（`--restore`，选中后可选先预览或正式还原）
-- 同样支持在命令行直接带参数运行（如 `clash_rebuild_rules.bat --dry-run`、`clash_rebuild_rules.bat --restore`）。
+- `[6]` 使用 jsDelivr CDN 镜像拉取（`--cdn jsdelivr`）
+- `[7]` 下载规则集不走代理（`--no-proxy-download`）
+- `[8]` 手动指定配置目录（`--dir`）
+- `[9]` 还原 `.bak` 备份（`--restore`）
+- 同样支持在命令行直接带参数运行（如 `clash_rebuild_rules.bat --source metacubex`、`clash_rebuild_rules.bat --restore`）。
 
 ### 方式二：Python 命令行版
 
 ```bash
-# 1. 预览将要写入的配置（推荐先跑，不修改任何文件）
-python clash_rebuild_rules.py --dry-run
-
-# 2. 正式写入所有远程订阅的 Merge 与 Rules 增强配置（默认带进度条预拉取全部规则集到本地缓存）
+# 1. 正式写入所有远程订阅的 Merge 与 Rules 增强配置（默认带进度条预拉取全部规则集到本地缓存）
 python clash_rebuild_rules.py
+
+# 2. 切换为 MetaCubeX 二进制 .mrs 规则集（体积更小、低内存，需 Mihomo 内核；可与 --cdn jsdelivr 组合）
+python clash_rebuild_rules.py --source metacubex
 
 # 可选：只写入配置文件，不预先拉取规则集（交由 Clash Verge 后台自行拉取）
 python clash_rebuild_rules.py --skip-download
@@ -59,9 +58,6 @@ python clash_rebuild_rules.py --profile "订阅名称" --group "节点选择"
 # 可选：重置 Rules 增强为模板默认规则（不保留界面中手工新增的自定义规则）
 python clash_rebuild_rules.py --reset-rules
 
-# 可选：切换为 MetaCubeX 二进制 .mrs 规则集（体积更小、低内存，需 Mihomo 内核；可与 --cdn jsdelivr 组合）
-python clash_rebuild_rules.py --source metacubex
-
 # 可选：使用 jsDelivr CDN 镜像拉取规则集
 python clash_rebuild_rules.py --cdn jsdelivr
 
@@ -71,7 +67,7 @@ python clash_rebuild_rules.py --no-proxy-download
 # 可选：手动指定 Clash Verge 配置目录（也可设置环境变量 CLASH_VERGE_DIR）
 python clash_rebuild_rules.py --dir "D:\path\to\clash-verge-config"
 
-# 还原：用首次生成的 .bak 备份恢复所有订阅（同样支持配合 --dry-run 预览）
+# 还原：用首次生成的 .bak 备份恢复所有订阅
 python clash_rebuild_rules.py --restore
 ```
 

@@ -1533,15 +1533,11 @@ function Backup-AndWrite([string]$Path, [string]$Text) {
     Write-Host "  已写入: $Path"
 }
 
-function Restore-FromBackup([string]$Path, [bool]$DryRun) {
+function Restore-FromBackup([string]$Path) {
     $bak = $Path + '.bak'
     if (-not [System.IO.File]::Exists($bak)) {
         Write-Host "  [skip] 没有备份 $bak" -ForegroundColor DarkGray
         return $false
-    }
-    if ($DryRun) {
-        Write-Host "  [dry-run] 将还原: $Path <- $bak" -ForegroundColor Yellow
-        return $true
     }
     [System.IO.File]::Copy($bak, $Path, $true)
     Write-Host "  已还原: $Path <- $bak" -ForegroundColor Green
@@ -1795,7 +1791,7 @@ function Get-RemoteProfilesInfo([string]$CfgDir) {
 function Invoke-RebuildAction($Opts) {
     $cfgDir = Find-ConfigDir $Opts.Dir
     if ([string]::IsNullOrEmpty($cfgDir)) {
-        Write-Host '未找到有效的 Clash Verge 配置目录，请指定包含 profiles.yaml 的目录（--dir 或菜单 [9]）。' -ForegroundColor Red
+        Write-Host '未找到有效的 Clash Verge 配置目录，请指定包含 profiles.yaml 的目录（--dir 或菜单 [8]）。' -ForegroundColor Red
         return 1
     }
     Write-Host "配置目录: $cfgDir`n"
@@ -1877,8 +1873,8 @@ function Invoke-RebuildAction($Opts) {
         $rulesPath = Join-Path $profilesDir $rulesFile
 
         if ($Opts.Restore) {
-            $r1 = Restore-FromBackup $mergePath $Opts.DryRun
-            $r2 = Restore-FromBackup $rulesPath $Opts.DryRun
+            $r1 = Restore-FromBackup $mergePath
+            $r2 = Restore-FromBackup $rulesPath
             if ($r1 -or $r2) { $changed++ }
             Write-Host ''
             continue
@@ -1948,49 +1944,23 @@ function Invoke-RebuildAction($Opts) {
         $mergeText = Format-YamlWithHeader $mergeCfg '由 clash_rebuild_rules.bat 生成：rule-providers 规则集数据源' $srcCfg.label
         $rulesText = Format-YamlWithHeader $rulesCfg '由 clash_rebuild_rules.bat 生成：右键「编辑规则」前置分流规则' $srcCfg.label
 
-        if ($Opts.DryRun) {
-            Write-Host '  ----- Merge 将写入的内容 -----'
-            foreach ($line in ($mergeText.TrimEnd("`n").Split("`n"))) {
-                Write-Host ('  | ' + $line)
-            }
-            Write-Host ("  ----- Rules (prepend 预览，delete 共 {0} 条已省略) -----" -f $subRules.Count)
-            $previewRules = New-OrderedDict
-            $previewRules['prepend'] = $rulesCfg['prepend']
-            $previewRules['append'] = $rulesCfg['append']
-            $delSummary = New-ObjList
-            [void]$delSummary.Add("<共 $($subRules.Count) 条原订阅规则>")
-            $previewRules['delete'] = $delSummary
-            $previewText = Format-YamlWithHeader $previewRules '右键「编辑规则」预览' $srcCfg.label
-            foreach ($line in ($previewText.TrimEnd("`n").Split("`n"))) {
-                Write-Host ('  | ' + $line)
-            }
-            Write-Host ''
-            continue
-        }
-
         Backup-AndWrite $mergePath $mergeText
         Backup-AndWrite $rulesPath $rulesText
         $changed++
         Write-Host ''
     }
 
-    if (-not $Opts.Restore -and -not $Opts.DryRun -and -not $Opts.SkipDownload -and $changed -gt 0) {
+    if (-not $Opts.Restore -and -not $Opts.SkipDownload -and $changed -gt 0) {
         [void](Invoke-PrefetchRulesets $cfgDir $Opts.Source $baseUrl $Opts.NoProxyDownload)
     }
 
     Write-Host ('=' * 60)
     if ($Opts.Restore) {
-        if ($Opts.DryRun) {
-            Write-Host ("dry-run 还原预览完成（涉及 {0} 个订阅），未写入任何文件。" -f $changed) -ForegroundColor Yellow
-        } else {
-            Write-Host ("还原完成（共处理 {0} 个订阅）。请回 Clash Verge 重新激活订阅/重启内核生效。" -f $changed) -ForegroundColor Green
-        }
-    } elseif ($Opts.DryRun) {
-        Write-Host 'dry-run 模式，未写入任何文件。确认无误后可执行正式写入。' -ForegroundColor Yellow
+        Write-Host ("还原完成（共处理 {0} 个订阅）。请回 Clash Verge 重新激活订阅/重启内核生效。" -f $changed) -ForegroundColor Green
     } else {
         Write-Host ("完成，共更新 {0} 个订阅的 Merge + Rules 增强配置。" -f $changed) -ForegroundColor Green
         Write-Host '请回 Clash Verge 重新激活当前订阅（或点击刷新/重启内核）生效；右键订阅 ->「编辑规则」即可查看和修改规则。'
-        Write-Host '如需还原：再次打开本工具选择 [10] 还原备份，或运行 clash_rebuild_rules.bat --restore'
+        Write-Host '如需还原：再次打开本工具选择 [9] 还原备份，或运行 clash_rebuild_rules.bat --restore'
     }
     return 0
 }
@@ -2002,7 +1972,6 @@ function Invoke-RebuildAction($Opts) {
 function New-RunOpts([string]$Dir) {
     return [PSCustomObject]@{
         Dir             = $Dir
-        DryRun          = $false
         Restore         = $false
         Source          = 'loyalsoldier'
         Cdn             = 'raw'
@@ -2174,38 +2143,51 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 Write-Host '  远程订阅 : 0 个（profiles.yaml 中未发现 remote 订阅）' -ForegroundColor Yellow
             }
         } else {
-            Write-Host '  配置目录 : 未自动检测到（请选择 [9] 手动指定）' -ForegroundColor Yellow
+            Write-Host '  配置目录 : 未自动检测到（请选择 [8] 手动指定）' -ForegroundColor Yellow
         }
 
         Write-Host '----------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host '  请选择要执行的功能（输入数字回车）:' -ForegroundColor White
-        Write-Host '    [1] 预览配置，不修改文件           (--dry-run)'
-        Write-Host '    [2] 正式写入并预拉取规则集         (默认应用)'
+        Write-Host '    [1] 正式写入并预拉取规则集         (默认应用)'
+        Write-Host '    [2] 使用 MetaCubeX 二进制 .mrs 源  (--source metacubex)'
         Write-Host '    [3] 仅写入配置，不预拉取规则集     (--skip-download)'
         Write-Host '    [4] 指定订阅 / 指定主代理组        (--profile / --group)'
         Write-Host '    [5] 重置规则为默认模板             (--reset-rules)'
-        Write-Host '    [6] 使用 MetaCubeX 二进制 .mrs 源  (--source metacubex)'
-        Write-Host '    [7] 使用 jsDelivr CDN 镜像拉取     (--cdn jsdelivr)'
-        Write-Host '    [8] 下载规则集不走代理（直连）     (--no-proxy-download)'
-        Write-Host '    [9] 手动指定配置目录               (--dir)'
-        Write-Host '   [10] 还原 .bak 备份                 (--restore)'
+        Write-Host '    [6] 使用 jsDelivr CDN 镜像拉取     (--cdn jsdelivr)'
+        Write-Host '    [7] 下载规则集不走代理（直连）     (--no-proxy-download)'
+        Write-Host '    [8] 手动指定配置目录               (--dir)'
+        Write-Host '    [9] 还原 .bak 备份                 (--restore)'
         Write-Host '    [0] 退出' -ForegroundColor DarkGray
         Write-Host '================================================================' -ForegroundColor Cyan
 
-        $choice = Read-MenuInput '请输入数字 (0-10)'
+        $choice = Read-MenuInput '请输入数字 (0-9)'
         if ($null -eq $choice) { return 0 }
 
         switch ($choice) {
             '1' {
                 Write-Host ''
                 $opts = New-RunOpts $customDir
-                $opts.DryRun = $true
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '2' {
                 Write-Host ''
+                Write-Host '选择 MetaCubeX (.mrs) 规则集下载地址:' -ForegroundColor Cyan
+                Write-Host '  [1] GitHub 原始地址（默认直接回车）'
+                Write-Host '  [2] jsDelivr CDN 镜像 (--cdn jsdelivr)'
+                Write-Host '  [0] 返回主菜单'
+                $mode = Read-MenuInput '请选择 (0-2)'
+                if ($null -eq $mode) { return 0 }
+                if ($mode -ceq '0') { continue }
                 $opts = New-RunOpts $customDir
+                $opts.Source = 'metacubex'
+                if ($mode -ceq '2') { $opts.Cdn = 'jsdelivr' }
+                elseif ($mode -cne '' -and $mode -cne '1') {
+                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
+                    Start-Sleep -Milliseconds 700
+                    continue
+                }
+                Write-Host ''
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
@@ -2221,15 +2203,13 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 if (-not (Prompt-Profiles $opts $scan)) { return 0 }
                 if (-not (Prompt-Group $opts $scan)) { return 0 }
                 Write-Host ''
-                Write-Host '  [1] 正式写入（默认直接回车）'
-                Write-Host '  [2] 仅预览 (--dry-run)'
-                Write-Host '  [3] 仅写入配置，不预拉取规则集 (--skip-download)'
+                Write-Host '  [1] 正式写入并预拉取规则集（默认直接回车）'
+                Write-Host '  [2] 仅写入配置，不预拉取规则集 (--skip-download)'
                 Write-Host '  [0] 返回主菜单'
-                $mode = Read-MenuInput '请选择执行方式 (0-3)'
+                $mode = Read-MenuInput '请选择执行方式 (0-2)'
                 if ($null -eq $mode) { return 0 }
                 if ($mode -ceq '0') { continue }
-                if ($mode -ceq '2') { $opts.DryRun = $true }
-                elseif ($mode -ceq '3') { $opts.SkipDownload = $true }
+                if ($mode -ceq '2') { $opts.SkipDownload = $true }
                 elseif ($mode -cne '' -and $mode -cne '1') {
                     Write-Host "无效选项: $mode" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
@@ -2242,62 +2222,37 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
             '5' {
                 Write-Host ''
                 Write-Host '提示：--reset-rules 会重置 Rules 增强为模板默认规则，清空界面手工新增的自定义规则。' -ForegroundColor Yellow
-                Write-Host '  [1] 正式重置并写入'
-                Write-Host '  [2] 仅预览 (--reset-rules --dry-run)'
+                Write-Host '  [1] 确认重置并写入'
                 Write-Host '  [0] 返回主菜单（默认直接回车）'
-                $mode = Read-MenuInput '请选择 (0-2)'
+                $mode = Read-MenuInput '请选择 (0-1)'
                 if ($null -eq $mode) { return 0 }
                 if ($mode -ceq '' -or $mode -ceq '0') { continue }
-                $opts = New-RunOpts $customDir
-                $opts.ResetRules = $true
-                if ($mode -ceq '2') { $opts.DryRun = $true }
-                elseif ($mode -cne '1') {
+                if ($mode -cne '1') {
                     Write-Host "无效选项: $mode" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
                     continue
                 }
+                $opts = New-RunOpts $customDir
+                $opts.ResetRules = $true
                 Write-Host ''
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '6' {
                 Write-Host ''
-                Write-Host '选择 MetaCubeX (.mrs) 规则集下载地址:' -ForegroundColor Cyan
-                Write-Host '  [1] GitHub 原始地址（默认直接回车）'
-                Write-Host '  [2] jsDelivr CDN 镜像 (--cdn jsdelivr)'
-                Write-Host '  [3] 仅预览 (--source metacubex --dry-run)'
-                Write-Host '  [0] 返回主菜单'
-                $mode = Read-MenuInput '请选择 (0-3)'
-                if ($null -eq $mode) { return 0 }
-                if ($mode -ceq '0') { continue }
                 $opts = New-RunOpts $customDir
-                $opts.Source = 'metacubex'
-                if ($mode -ceq '2') { $opts.Cdn = 'jsdelivr' }
-                elseif ($mode -ceq '3') { $opts.DryRun = $true }
-                elseif ($mode -cne '' -and $mode -cne '1') {
-                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
-                    Start-Sleep -Milliseconds 700
-                    continue
-                }
-                Write-Host ''
+                $opts.Cdn = 'jsdelivr'
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '7' {
                 Write-Host ''
                 $opts = New-RunOpts $customDir
-                $opts.Cdn = 'jsdelivr'
-                [void](Invoke-RebuildAction $opts)
-                Pause-ForMenu
-            }
-            '8' {
-                Write-Host ''
-                $opts = New-RunOpts $customDir
                 $opts.NoProxyDownload = $true
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
-            '9' {
+            '8' {
                 Write-Host ''
                 Write-Host '提示：可直接将 Clash Verge 配置目录拖入窗口（目录内需有 profiles.yaml），直接回车恢复自动识别。' -ForegroundColor DarkGray
                 $rawDir = Read-MenuInput '请输入配置目录路径'
@@ -2314,44 +2269,40 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 }
                 $customDir = $rawDir
                 Write-Host "已切换配置目录为: $customDir" -ForegroundColor Green
-                Write-Host '  [1] 立即预览配置 (--dry-run)'
-                Write-Host '  [2] 立即正式写入'
+                Write-Host '  [1] 立即正式写入'
                 Write-Host '  [0] 返回主菜单继续选择其它功能（默认直接回车）'
-                $sub = Read-MenuInput '请选择 (0-2)'
+                $sub = Read-MenuInput '请选择 (0-1)'
                 if ($null -eq $sub) { return 0 }
-                if ($sub -ceq '1' -or $sub -ceq '2') {
+                if ($sub -ceq '1') {
                     Write-Host ''
                     $opts = New-RunOpts $customDir
-                    if ($sub -ceq '1') { $opts.DryRun = $true }
                     [void](Invoke-RebuildAction $opts)
                     Pause-ForMenu
                 }
             }
-            '10' {
+            '9' {
                 Write-Host ''
-                Write-Host '还原 .bak 备份:' -ForegroundColor Cyan
-                Write-Host '  [1] 预览还原，不修改文件 (--restore --dry-run)'
-                Write-Host '  [2] 正式还原所有订阅备份 (--restore)'
+                Write-Host '提示：将用首次生成的 .bak 备份覆盖还原所有订阅的 Merge 与 Rules 文件。' -ForegroundColor Yellow
+                Write-Host '  [1] 确认还原备份 (--restore)'
                 Write-Host '  [0] 返回主菜单（默认直接回车）'
-                $mode = Read-MenuInput '请选择 (0-2)'
+                $mode = Read-MenuInput '请选择 (0-1)'
                 if ($null -eq $mode) { return 0 }
                 if ($mode -ceq '' -or $mode -ceq '0') { continue }
-                $opts = New-RunOpts $customDir
-                $opts.Restore = $true
-                $opts.SkipDownload = $true
-                if ($mode -ceq '1') { $opts.DryRun = $true }
-                elseif ($mode -cne '2') {
+                if ($mode -cne '1') {
                     Write-Host "无效选项: $mode" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
                     continue
                 }
+                $opts = New-RunOpts $customDir
+                $opts.Restore = $true
+                $opts.SkipDownload = $true
                 Write-Host ''
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '0' { return 0 }
             default {
-                Write-Host "无效选项: $choice（请输入 0-10 的数字）" -ForegroundColor Yellow
+                Write-Host "无效选项: $choice（请输入 0-9 的数字）" -ForegroundColor Yellow
                 Start-Sleep -Milliseconds 700
             }
         }
@@ -2369,17 +2320,16 @@ function Show-CliHelp {
   clash_rebuild_rules.bat [选项]               命令行模式（无需安装 Python，与 .py 参数兼容）
 
 常用选项:
-  --dry-run                只预览将要写入或还原的内容，不修改任何文件
   --apply                  直接以默认参数执行正式写入（命令行无其它标志时使用）
-  --restore                用首次生成的 .bak 备份还原 Merge 与 Rules 文件
   --source <源>            规则集源：loyalsoldier（默认 YAML）或 metacubex（.mrs 低内存）
-  --cdn <镜像>             下载源：raw（默认 GitHub）或 jsdelivr（国内 CDN）
   --skip-download          只写入配置文件，不预先拉取规则集到本地缓存
-  --no-proxy-download      下载规则集时不指定 proxy，且预拉取不走系统代理
-  --reset-rules            重置 Rules 增强为模板默认规则，不保留界面手工新增规则
   --profile <名称/uid>     仅处理指定订阅（可重复指定）
   --group <代理组名>       手动指定主代理组名（覆盖自动识别）
+  --reset-rules            重置 Rules 增强为模板默认规则，不保留界面手工新增规则
+  --cdn <镜像>             下载源：raw（默认 GitHub）或 jsdelivr（国内 CDN）
+  --no-proxy-download      下载规则集时不指定 proxy，且预拉取不走系统代理
   --dir <目录>             手动指定 Clash Verge 配置目录
+  --restore                用首次生成的 .bak 备份还原 Merge 与 Rules 文件
   -h, --help               显示此帮助信息
 '@
 }
@@ -2389,7 +2339,6 @@ function Parse-CliArgs([System.Collections.Generic.List[string]]$ArgList) {
         ShowHelp        = $false
         OpenMenu        = $false
         Dir             = $null
-        DryRun          = $false
         Restore         = $false
         Source          = 'loyalsoldier'
         Cdn             = 'raw'
@@ -2415,7 +2364,6 @@ function Parse-CliArgs([System.Collections.Generic.List[string]]$ArgList) {
             '--help'              { $opts.ShowHelp = $true }
             '--menu'              { $opts.OpenMenu = $true }
             '--apply'             { }
-            '--dry-run'           { $opts.DryRun = $true }
             '--restore'           { $opts.Restore = $true }
             '--skip-download'     { $opts.SkipDownload = $true }
             '--no-proxy-download' { $opts.NoProxyDownload = $true }

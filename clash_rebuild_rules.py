@@ -21,23 +21,21 @@
 安全性
 ------
 - 每个 Merge / Rules 文件首次修改前备份为 <file>.bak（保留原始模板/内容，用于还原）。
-- --dry-run 只预览不写入（同样适用于 --restore --dry-run）。
 - 结尾有 MATCH→代理组 兜底：即使远程订阅更新新增了未在 delete 中的规则，也会被 MATCH 提前截获。
 - --restore 用 .bak 还原所有订阅的 Merge 和 Rules 文件。
 
 用法
 ----
-  python clash_rebuild_rules.py --dry-run            # 预览（推荐先跑）
-  python clash_rebuild_rules.py                      # 应用
+  python clash_rebuild_rules.py                      # 应用（默认 Loyalsoldier YAML 源）
+  python clash_rebuild_rules.py --source metacubex   # 使用 MetaCubeX 二进制 .mrs 规则集（体积小、低内存，需 Mihomo 内核）
+  python clash_rebuild_rules.py --skip-download      # 只写配置文件，不预先拉取规则集
   python clash_rebuild_rules.py --profile 订阅名      # 仅处理指定订阅（可重复指定）
   python clash_rebuild_rules.py --group 节点选择      # 手动指定目标主代理组名
   python clash_rebuild_rules.py --reset-rules        # 重置 Rules 增强，不保留界面手工新增规则
-  python clash_rebuild_rules.py --source metacubex   # 使用 MetaCubeX 二进制 .mrs 规则集（体积小、低内存，需 Mihomo 内核）
   python clash_rebuild_rules.py --cdn jsdelivr       # 用 jsdelivr 镜像(国内多数可直连)
   python clash_rebuild_rules.py --no-proxy-download  # 规则下载不走代理(境外网络用)
-  python clash_rebuild_rules.py --skip-download      # 只写配置文件，不预先拉取规则集
-  python clash_rebuild_rules.py --restore            # 用 .bak 还原所有订阅
   python clash_rebuild_rules.py --dir D:\\xxx         # 手动指定 Clash Verge 配置目录
+  python clash_rebuild_rules.py --restore            # 用 .bak 还原所有订阅
 
 依赖：PyYAML（pip install pyyaml）
 """
@@ -386,14 +384,11 @@ def backup_and_write(path, text):
     print('  已写入: %s' % path)
 
 
-def restore_file(path, dry_run=False):
+def restore_file(path):
     bak = path + '.bak'
     if not os.path.isfile(bak):
         print('  [skip] 没有备份 %s' % bak)
         return False
-    if dry_run:
-        print('  [dry-run] 将还原: %s <- %s' % (path, bak))
-        return True
     shutil.copy2(bak, path)
     print('  已还原: %s <- %s' % (path, bak))
     return True
@@ -556,7 +551,6 @@ def main():
     _fix_stdout()
     ap = argparse.ArgumentParser(description='整套重建 Clash Verge 所有订阅的分流规则（支持右键编辑规则查看）')
     ap.add_argument('--dir', help='Clash Verge 配置目录（默认自动找 %%APPDATA%% 下）')
-    ap.add_argument('--dry-run', action='store_true', help='只预览，不写入')
     ap.add_argument('--profile', action='append',
                     help='仅处理指定订阅（按订阅名称、uid 或文件名匹配，可重复指定）')
     ap.add_argument('--group',
@@ -636,8 +630,8 @@ def main():
         rules_path = os.path.join(profiles_dir, rules_file)
 
         if args.restore:
-            r1 = restore_file(merge_path, dry_run=args.dry_run)
-            r2 = restore_file(rules_path, dry_run=args.dry_run)
+            r1 = restore_file(merge_path)
+            r2 = restore_file(rules_path)
             if r1 or r2:
                 changed += 1
             print()
@@ -690,37 +684,17 @@ def main():
             rules_cfg, '由 clash_rebuild_rules.py 生成：右键「编辑规则」前置分流规则', src_cfg['label']
         )
 
-        if args.dry_run:
-            print('  ----- Merge 将写入的内容 -----')
-            for line in merge_text.rstrip('\n').splitlines():
-                print('  | ' + line)
-            print('  ----- Rules (prepend 预览，delete 共 %d 条已省略) -----' % len(sub_rules))
-            preview_rules = {
-                'prepend': rules_cfg['prepend'],
-                'append': rules_cfg['append'],
-                'delete': ['<共 %d 条原订阅规则>' % len(sub_rules)],
-            }
-            for line in dump_yaml_with_header(preview_rules, '右键「编辑规则」预览', src_cfg['label']).rstrip('\n').splitlines():
-                print('  | ' + line)
-            print()
-            continue
-
         backup_and_write(merge_path, merge_text)
         backup_and_write(rules_path, rules_text)
         changed += 1
         print()
 
-    if not args.restore and not args.dry_run and not args.skip_download and changed > 0:
+    if not args.restore and not args.skip_download and changed > 0:
         prefetch_rulesets(cfg_dir, args.source, base_url, no_proxy=args.no_proxy_download)
 
     print('=' * 60)
     if args.restore:
-        if args.dry_run:
-            print('dry-run 还原预览完成（涉及 %d 个订阅），未写入任何文件。' % changed)
-        else:
-            print('还原完成（共处理 %d 个订阅）。请回 Clash Verge 重新激活订阅/重启内核生效。' % changed)
-    elif args.dry_run:
-        print('dry-run 模式，未写入任何文件。确认无误后去掉 --dry-run 再运行。')
+        print('还原完成（共处理 %d 个订阅）。请回 Clash Verge 重新激活订阅/重启内核生效。' % changed)
     else:
         print('完成，共更新 %d 个订阅的 Merge + Rules 增强配置。' % changed)
         print('请回 Clash Verge 重新激活当前订阅（或点击刷新/重启内核）生效；右键订阅 ->「编辑规则」即可查看和修改规则。')
