@@ -7,6 +7,7 @@
 - **原生可视化编辑**：将配置拆分为 **Merge 增强**（仅提供 `rule-providers`，不触碰 `rules` 和 `dns`，避免覆盖面板或与 Clash Verge 的 DNS 覆盖冲突）与 **Rules 增强**（写入 `prepend` 前置规则并用 `delete` 屏蔽机场原规则），右键订阅点击「编辑规则」即可直接看到全部生效规则并随时增删改。
 - **规则集预拉取进度条 & 双规则源可选**：基于 Mihomo / Clash 原生 `rule-providers`（`interval: 86400`），应用配置时默认将全部 10 份规则集预先拉取到 Clash Verge 的 `ruleset/` 本地缓存并显示终端动态进度条（支持 `--skip-download` 跳过，避免首次冷启动拉取失败）；默认使用 `Loyalsoldier/clash-rules`（YAML 文本，便于直接打开排查），也支持通过 `--source metacubex` 切换为官方 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat) 二进制 `.mrs` 规则集（体积约 820 KB，启动解析更快、内存占用更低）。
 - **Bing 国内直连**：精确放行 `bing.com` / `bing.net` / `bingapis.com` / `bingj.com` 直连（置于 `reject` 之后保留广告拦截，置于 `gfw`/`proxy` 之前防止走代理）。
+- **Steam 下载直连**：精确放行 `steamcontent.com`、`steamserver.net`、`steamchina.com`、`st.dl.pinyuncloud.com` 与 `steampipe.akamaized.net` 直连（补齐 Loyalsoldier 与 MetaCubeX `cn.mrs` 缺失，避免游戏下载/更新走代理；商店与社区仍走代理）。
 - **修正黑白名单交叉误伤**：
   - 采用 `gfw → direct → proxy` 顺序：既保证被墙域名走代理，又避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名。
   - 在 `reject` 广告拦截前精确放行 `gvt2.com`（Chrome/Google 组件更新）与 `statsig.anthropic.com`（Claude 功能开关），补齐 `gstatic.cn` 走代理与 `GEOIP,LAN,DIRECT` 内网域名兜底。
@@ -75,11 +76,13 @@ python clash_rebuild_rules.py --restore
 
 1. 脚本运行完成后，打开 **Clash Verge** → 进入 **「订阅（Profiles）」**，点击当前激活的订阅卡片重新加载（或点击右上角重启内核）即可生效。
 2. 在「订阅」页 **右键订阅 →「编辑规则」**：
-   - 顶部无删除线的 **20 条规则** 即为当前生效的完整分流规则；
+   - 顶部无删除线的 **25 条规则** 即为当前生效的完整分流规则；
    - 下方带**红色删除线**的条目是已被屏蔽的机场自带旧规则，运行时不会加载、也不会生效。
 3. **Bing 国内版提示**：
    - 若浏览器此前挂代理访问过必应并缓存了国际版 Cookie，首次切回直连时访问一次 `https://cn.bing.com`（或清除浏览器中 `bing.com` 的 Cookie），后续地址栏默认搜索即可稳定使用国内版必应。
    - 若需要为 Bing 指定上游 DNS（如在开启了「DNS 覆盖」且主 `nameserver` 含海外 DNS 时），请在 Clash Verge 的 **「设置 → DNS 覆盖」** 面板内配置 `nameserver-policy`，不要写在 Merge 中（否则会被 `AuthoritativeFields` 丢弃）。
+4. **Steam 下载提示**：
+   - 规则生效后，请同时在 Steam **「设置 → 下载 → 下载地区」** 确认选择国内城市并重启 Steam，避免因客户端此前锁定海外下载地区而直连海外节点导致速度变慢。
 
 ## 分流规则匹配顺序
 
@@ -92,14 +95,15 @@ Clash 按从上到下顺序匹配，**命中第一条即停止**（`{group}` 自
 | 3 | `DOMAIN,statsig.anthropic.com` | `{group}` | 放行 Claude 特性开关（防 `reject` 误杀） |
 | 4 | `RULE-SET,reject` | `REJECT` | 广告与追踪域名拦截 |
 | 5–8 | `DOMAIN-SUFFIX,bing.com / bing.net / bingapis.com / bingj.com` | `DIRECT` | Bing 国内搜索、联想 API、静态资源与快照直连 |
-| 9–10 | `RULE-SET,icloud` / `RULE-SET,apple` | `DIRECT` | iCloud 与 Apple 国内 CDN 直连 |
-| 11–12 | `RULE-SET,google` / `DOMAIN-SUFFIX,gstatic.cn` | `{group}` | Google 大陆可直连域名与 `gstatic.cn` 强制走代理 |
-| 13 | `RULE-SET,gfw` | `{group}` | GFW 被墙域名走代理 |
-| 14 | `RULE-SET,direct` | `DIRECT` | 国内网站与微软 / 游戏 / 驱动下载 CDN 直连 |
-| 15 | `RULE-SET,proxy` | `{group}` | 海外常见服务走代理（Claude / OpenAI / GitHub / Cursor 等） |
-| 16–17 | `RULE-SET,lancidr` / `RULE-SET,cncidr` (`no-resolve`) | `DIRECT` | 局域网与中国大陆 IP 段直连（免 DNS 解析） |
-| 18–19 | `GEOIP,LAN` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
-| 20 | `MATCH` | `{group}` | 其余未命中流量默认走主代理组兜底 |
+| 9–13 | `DOMAIN-SUFFIX,steamcontent.com / steamserver.net / steamchina.com / st.dl.pinyuncloud.com`、`DOMAIN,steampipe.akamaized.net` | `DIRECT` | Steam 游戏下载/更新 CDN 与 CM 连接直连（商店/社区仍走代理） |
+| 14–15 | `RULE-SET,icloud` / `RULE-SET,apple` | `DIRECT` | iCloud 与 Apple 国内 CDN 直连 |
+| 16–17 | `RULE-SET,google` / `DOMAIN-SUFFIX,gstatic.cn` | `{group}` | Google 大陆可直连域名与 `gstatic.cn` 强制走代理 |
+| 18 | `RULE-SET,gfw` | `{group}` | GFW 被墙域名走代理 |
+| 19 | `RULE-SET,direct` | `DIRECT` | 国内网站与微软 / 游戏 / 驱动下载 CDN 直连 |
+| 20 | `RULE-SET,proxy` | `{group}` | 海外常见服务走代理（Claude / OpenAI / GitHub / Cursor 等） |
+| 21–22 | `RULE-SET,lancidr` / `RULE-SET,cncidr` (`no-resolve`) | `DIRECT` | 局域网与中国大陆 IP 段直连（免 DNS 解析） |
+| 23–24 | `GEOIP,LAN` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
+| 25 | `MATCH` | `{group}` | 其余未命中流量默认走主代理组兜底 |
 
 ## 仓库文件说明
 

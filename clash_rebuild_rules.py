@@ -10,7 +10,7 @@
      - rule-providers: 指向 Loyalsoldier/clash-rules (YAML，默认) 或 MetaCubeX/meta-rules-dat (MRS 二进制，--source metacubex) 在线规则集（自动更新，interval=86400s）
      - 保留 Merge 文件中用户原有的其它配置项（如 tun/profile/sniffer 等），并移除旧版遗留的 rules 字段
   2. 规则(Rules)增强（即 Clash Verge 右键订阅 ->「编辑规则」所读写的配置）:
-     - prepend: 完整的分流规则（含 Bing 国内直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
+     - prepend: 完整的分流规则（含 Bing/Steam 下载直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
      - delete:  标记删除订阅自带的旧规则（界面上显示删除线，运行时不再冗余保留）
 
 为什么拆成 Merge + Rules 增强
@@ -110,6 +110,11 @@ RULE_TEMPLATES = [
     'DOMAIN-SUFFIX,bing.net,DIRECT',         # Bing 静态资源/缩略图 CDN 直连
     'DOMAIN-SUFFIX,bingapis.com,DIRECT',     # Bing 搜索联想 API 直连
     'DOMAIN-SUFFIX,bingj.com,DIRECT',        # Bing 网页快照直连
+    'DOMAIN-SUFFIX,steamcontent.com,DIRECT', # Steam 游戏本体/更新核心下载 CDN 直连（防落入 proxy 跑代理流量）
+    'DOMAIN-SUFFIX,steamserver.net,DIRECT',  # Steam 客户端 CM 连接直连（防被误判到海外下载节点）
+    'DOMAIN-SUFFIX,steamchina.com,DIRECT',   # Steam 国区阿里/腾讯/网宿下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
+    'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',  # Steam 国内下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
+    'DOMAIN,steampipe.akamaized.net,DIRECT', # Akamai SteamPipe 游戏内容分发直连
     'RULE-SET,icloud,DIRECT',
     'RULE-SET,apple,DIRECT',
     'RULE-SET,google,{group}',               # Google 大陆可直连域名强制走代理
