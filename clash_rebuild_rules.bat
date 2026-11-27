@@ -38,7 +38,13 @@ try {
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:InvCulture = [System.Globalization.CultureInfo]::InvariantCulture
 
-# ---------------- 规则源定义（与 clash_rebuild_rules.py 保持一致） ----------------
+# ---------------- 分流模式与规则源定义（与 clash_rebuild_rules.py 保持一致） ----------------
+$script:RuleModes = [ordered]@{
+    'hybrid'    = '混合模式 (浏览器海外兜底走代理 + 后台/系统/工具兜底直连，推荐)'
+    'blacklist' = '黑名单模式 (MATCH,DIRECT，全局默认直连，仅被墙/Google/AI/Telegram 走代理)'
+    'whitelist' = '白名单模式 (MATCH,PROXY，全局默认代理，国内与常用 CDN 直连)'
+}
+
 $script:RuleSources = [ordered]@{
     'loyalsoldier' = @{
         label     = 'Loyalsoldier/clash-rules (YAML)'
@@ -46,18 +52,44 @@ $script:RuleSources = [ordered]@{
         path_tpl  = './ruleset/clashrules_{0}.yaml'
         raw_base  = 'https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/'
         cdn_base  = 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/'
-        providers = @(
-            @('private', 'private.txt', 'domain'),
-            @('reject',  'reject.txt',  'domain'),
-            @('icloud',  'icloud.txt',  'domain'),
-            @('apple',   'apple.txt',   'domain'),
-            @('google',  'google.txt',  'domain'),
-            @('gfw',     'gfw.txt',     'domain'),
-            @('direct',  'direct.txt',  'domain'),
-            @('proxy',   'proxy.txt',   'domain'),
-            @('lancidr', 'lancidr.txt', 'ipcidr'),
-            @('cncidr',  'cncidr.txt',  'ipcidr')
-        )
+        providers = @{
+            'hybrid' = @(
+                @('private',      'private.txt',                      'domain'),
+                @('reject',       'reject.txt',                       'domain'),
+                @('icloud',       'icloud.txt',                       'domain'),
+                @('apple',        'apple.txt',                        'domain'),
+                @('google',       'google.txt',                       'domain'),
+                @('ai',           'geo/geosite/category-ai-!cn.yaml', 'domain', 'metacubex'),
+                @('gfw',          'gfw.txt',                          'domain'),
+                @('telegram',     'geo/geosite/telegram.yaml',        'domain', 'metacubex'),
+                @('telegramcidr', 'telegramcidr.txt',                 'ipcidr'),
+                @('microsoftcn',  'geo/geosite/microsoft@cn.yaml',    'domain', 'metacubex'),
+                @('direct',       'direct.txt',                       'domain'),
+                @('lancidr',      'lancidr.txt',                      'ipcidr'),
+                @('cncidr',       'cncidr.txt',                       'ipcidr')
+            )
+            'blacklist' = @(
+                @('private',      'private.txt',                      'domain'),
+                @('reject',       'reject.txt',                       'domain'),
+                @('google',       'google.txt',                       'domain'),
+                @('gfw',          'gfw.txt',                          'domain'),
+                @('ai',           'geo/geosite/category-ai-!cn.yaml', 'domain', 'metacubex'),
+                @('telegram',     'geo/geosite/telegram.yaml',        'domain', 'metacubex'),
+                @('telegramcidr', 'telegramcidr.txt',                 'ipcidr')
+            )
+            'whitelist' = @(
+                @('private', 'private.txt', 'domain'),
+                @('reject',  'reject.txt',  'domain'),
+                @('icloud',  'icloud.txt',  'domain'),
+                @('apple',   'apple.txt',   'domain'),
+                @('google',  'google.txt',  'domain'),
+                @('gfw',     'gfw.txt',     'domain'),
+                @('direct',  'direct.txt',  'domain'),
+                @('proxy',   'proxy.txt',   'domain'),
+                @('lancidr', 'lancidr.txt', 'ipcidr'),
+                @('cncidr',  'cncidr.txt',  'ipcidr')
+            )
+        }
     }
     'metacubex' = @{
         label     = 'MetaCubeX/meta-rules-dat (MRS 二进制，低内存)'
@@ -65,50 +97,131 @@ $script:RuleSources = [ordered]@{
         path_tpl  = './ruleset/metacubex_{0}.mrs'
         raw_base  = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/'
         cdn_base  = 'https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/'
-        providers = @(
-            @('private', 'geo/geosite/private.mrs',          'domain'),
-            @('reject',  'geo/geosite/category-ads-all.mrs', 'domain'),
-            @('icloud',  'geo/geosite/icloud.mrs',           'domain'),
-            @('apple',   'geo/geosite/apple-cn.mrs',         'domain'),
-            @('google',  'geo/geosite/google.mrs',           'domain'),
-            @('gfw',     'geo/geosite/gfw.mrs',              'domain'),
-            @('direct',  'geo/geosite/cn.mrs',               'domain'),
-            @('proxy',   'geo/geosite/geolocation-!cn.mrs',  'domain'),
-            @('lancidr', 'geo/geoip/private.mrs',            'ipcidr'),
-            @('cncidr',  'geo/geoip/cn.mrs',                 'ipcidr')
-        )
+        providers = @{
+            'hybrid' = @(
+                @('private',      'geo/geosite/private.mrs',          'domain'),
+                @('reject',       'geo/geosite/category-ads-all.mrs', 'domain'),
+                @('icloud',       'geo/geosite/icloud.mrs',           'domain'),
+                @('apple',        'geo/geosite/apple-cn.mrs',         'domain'),
+                @('google',       'geo/geosite/google.mrs',           'domain'),
+                @('ai',           'geo/geosite/category-ai-!cn.mrs',  'domain'),
+                @('gfw',          'geo/geosite/gfw.mrs',              'domain'),
+                @('telegram',     'geo/geosite/telegram.mrs',         'domain'),
+                @('telegramcidr', 'geo/geoip/telegram.mrs',           'ipcidr'),
+                @('microsoftcn',  'geo/geosite/microsoft@cn.mrs',     'domain'),
+                @('direct',       'geo/geosite/cn.mrs',               'domain'),
+                @('lancidr',      'geo/geoip/private.mrs',            'ipcidr'),
+                @('cncidr',       'geo/geoip/cn.mrs',                 'ipcidr')
+            )
+            'blacklist' = @(
+                @('private',      'geo/geosite/private.mrs',          'domain'),
+                @('reject',       'geo/geosite/category-ads-all.mrs', 'domain'),
+                @('google',       'geo/geosite/google.mrs',           'domain'),
+                @('gfw',          'geo/geosite/gfw.mrs',              'domain'),
+                @('ai',           'geo/geosite/category-ai-!cn.mrs',  'domain'),
+                @('telegram',     'geo/geosite/telegram.mrs',         'domain'),
+                @('telegramcidr', 'geo/geoip/telegram.mrs',           'ipcidr')
+            )
+            'whitelist' = @(
+                @('private', 'geo/geosite/private.mrs',          'domain'),
+                @('reject',  'geo/geosite/category-ads-all.mrs', 'domain'),
+                @('icloud',  'geo/geosite/icloud.mrs',           'domain'),
+                @('apple',   'geo/geosite/apple-cn.mrs',         'domain'),
+                @('google',  'geo/geosite/google.mrs',           'domain'),
+                @('gfw',     'geo/geosite/gfw.mrs',              'domain'),
+                @('direct',  'geo/geosite/cn.mrs',               'domain'),
+                @('proxy',   'geo/geosite/geolocation-!cn.mrs',  'domain'),
+                @('lancidr', 'geo/geoip/private.mrs',            'ipcidr'),
+                @('cncidr',  'geo/geoip/cn.mrs',                 'ipcidr')
+            )
+        }
     }
 }
 
-$script:RuleTemplates = @(
-    'RULE-SET,private,DIRECT',
-    'DOMAIN-SUFFIX,gvt2.com,{group}',
-    'DOMAIN,statsig.anthropic.com,{group}',
-    'RULE-SET,reject,REJECT',
-    'DOMAIN-SUFFIX,bing.com,DIRECT',
-    'DOMAIN-SUFFIX,bing.net,DIRECT',
-    'DOMAIN-SUFFIX,bingapis.com,DIRECT',
-    'DOMAIN-SUFFIX,bingj.com,DIRECT',
-    'DOMAIN-SUFFIX,steamcontent.com,DIRECT',
-    'DOMAIN-SUFFIX,steamserver.net,DIRECT',
-    'DOMAIN-SUFFIX,steamchina.com,DIRECT',
-    'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',
-    'DOMAIN,steampipe.akamaized.net,DIRECT',
-    'DOMAIN-SUFFIX,qoder.sh,DIRECT',
-    'DOMAIN-SUFFIX,traecdn.us,DIRECT',
-    'RULE-SET,icloud,DIRECT',
-    'RULE-SET,apple,DIRECT',
-    'RULE-SET,google,{group}',
-    'DOMAIN-SUFFIX,gstatic.cn,{group}',
-    'RULE-SET,gfw,{group}',
-    'RULE-SET,direct,DIRECT',
-    'RULE-SET,proxy,{group}',
-    'RULE-SET,lancidr,DIRECT,no-resolve',
-    'RULE-SET,cncidr,DIRECT,no-resolve',
-    'GEOIP,LAN,DIRECT',
-    'GEOIP,CN,DIRECT',
-    'MATCH,{group}'
-)
+$script:RuleTemplates = @{
+    'hybrid' = @(
+        'RULE-SET,private,DIRECT',
+        'DOMAIN-SUFFIX,gvt2.com,{group}',
+        'DOMAIN,statsig.anthropic.com,{group}',
+        'RULE-SET,reject,REJECT',
+        'DOMAIN-SUFFIX,bing.com,DIRECT',
+        'DOMAIN-SUFFIX,bing.net,DIRECT',
+        'DOMAIN-SUFFIX,bingapis.com,DIRECT',
+        'DOMAIN-SUFFIX,bingj.com,DIRECT',
+        'DOMAIN-SUFFIX,steamcontent.com,DIRECT',
+        'DOMAIN-SUFFIX,steamserver.net,DIRECT',
+        'DOMAIN-SUFFIX,steamchina.com,DIRECT',
+        'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',
+        'DOMAIN,steampipe.akamaized.net,DIRECT',
+        'DOMAIN-SUFFIX,qoder.sh,DIRECT',
+        'DOMAIN-SUFFIX,traecdn.us,DIRECT',
+        'RULE-SET,icloud,DIRECT',
+        'RULE-SET,apple,DIRECT',
+        'RULE-SET,google,{group}',
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',
+        'RULE-SET,ai,{group}',
+        'RULE-SET,gfw,{group}',
+        'RULE-SET,telegram,{group}',
+        'DOMAIN-SUFFIX,challenges.cloudflare.com,{group}',
+        'RULE-SET,telegramcidr,{group},no-resolve',
+        'RULE-SET,microsoftcn,DIRECT',
+        'RULE-SET,direct,DIRECT',
+        'RULE-SET,lancidr,DIRECT,no-resolve',
+        'RULE-SET,cncidr,DIRECT,no-resolve',
+        'GEOIP,LAN,DIRECT',
+        'GEOIP,CN,DIRECT',
+        'PROCESS-NAME,chrome.exe,{group}',
+        'PROCESS-NAME,msedge.exe,{group}',
+        'PROCESS-NAME,ego.exe,{group}',
+        'PROCESS-NAME,firefox.exe,{group}',
+        'PROCESS-NAME,brave.exe,{group}',
+        'PROCESS-NAME,arc.exe,{group}',
+        'MATCH,DIRECT'
+    )
+    'blacklist' = @(
+        'RULE-SET,private,DIRECT',
+        'DOMAIN-SUFFIX,gvt2.com,{group}',
+        'DOMAIN,statsig.anthropic.com,{group}',
+        'RULE-SET,reject,REJECT',
+        'RULE-SET,google,{group}',
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',
+        'RULE-SET,ai,{group}',
+        'RULE-SET,gfw,{group}',
+        'RULE-SET,telegram,{group}',
+        'DOMAIN-SUFFIX,challenges.cloudflare.com,{group}',
+        'RULE-SET,telegramcidr,{group},no-resolve',
+        'MATCH,DIRECT'
+    )
+    'whitelist' = @(
+        'RULE-SET,private,DIRECT',
+        'DOMAIN-SUFFIX,gvt2.com,{group}',
+        'DOMAIN,statsig.anthropic.com,{group}',
+        'RULE-SET,reject,REJECT',
+        'DOMAIN-SUFFIX,bing.com,DIRECT',
+        'DOMAIN-SUFFIX,bing.net,DIRECT',
+        'DOMAIN-SUFFIX,bingapis.com,DIRECT',
+        'DOMAIN-SUFFIX,bingj.com,DIRECT',
+        'DOMAIN-SUFFIX,steamcontent.com,DIRECT',
+        'DOMAIN-SUFFIX,steamserver.net,DIRECT',
+        'DOMAIN-SUFFIX,steamchina.com,DIRECT',
+        'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',
+        'DOMAIN,steampipe.akamaized.net,DIRECT',
+        'DOMAIN-SUFFIX,qoder.sh,DIRECT',
+        'DOMAIN-SUFFIX,traecdn.us,DIRECT',
+        'RULE-SET,icloud,DIRECT',
+        'RULE-SET,apple,DIRECT',
+        'RULE-SET,google,{group}',
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',
+        'RULE-SET,gfw,{group}',
+        'RULE-SET,direct,DIRECT',
+        'RULE-SET,proxy,{group}',
+        'RULE-SET,lancidr,DIRECT,no-resolve',
+        'RULE-SET,cncidr,DIRECT,no-resolve',
+        'GEOIP,LAN,DIRECT',
+        'GEOIP,CN,DIRECT',
+        'MATCH,{group}'
+    )
+}
 
 function Get-RuleKey([string]$Rule) {
     $parts = $Rule.Split(',')
@@ -123,16 +236,32 @@ function Get-RuleKey([string]$Rule) {
     return $rtype
 }
 
+function Resolve-ProviderUrl([string]$Source, [string]$Cdn, $Item) {
+    $overrideSrc = $Source
+    if ($Item.Length -ge 4 -and -not [string]::IsNullOrEmpty($Item[3])) {
+        $overrideSrc = [string]$Item[3]
+    }
+    $baseKey = if ($Cdn -ceq 'jsdelivr') { 'cdn_base' } else { 'raw_base' }
+    return $script:RuleSources[$overrideSrc][$baseKey] + [string]$Item[1]
+}
+
 $script:ManagedProviderNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
 foreach ($srcKey in $script:RuleSources.Keys) {
-    foreach ($p in $script:RuleSources[$srcKey].providers) {
-        [void]$script:ManagedProviderNames.Add($p[0])
+    foreach ($modeKey in $script:RuleSources[$srcKey].providers.Keys) {
+        foreach ($p in $script:RuleSources[$srcKey].providers[$modeKey]) {
+            [void]$script:ManagedProviderNames.Add([string]$p[0])
+        }
     }
 }
 
 $script:ManagedRuleKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
-foreach ($tpl in $script:RuleTemplates) {
-    [void]$script:ManagedRuleKeys.Add((Get-RuleKey $tpl))
+foreach ($modeKey in $script:RuleTemplates.Keys) {
+    foreach ($tpl in $script:RuleTemplates[$modeKey]) {
+        [void]$script:ManagedRuleKeys.Add((Get-RuleKey $tpl))
+    }
+}
+foreach ($pname in $script:ManagedProviderNames) {
+    [void]$script:ManagedRuleKeys.Add(('RULE-SET,' + $pname.ToLowerInvariant()))
 }
 [void]$script:ManagedRuleKeys.Add('MATCH')
 [void]$script:ManagedRuleKeys.Add('FINAL')
@@ -1400,7 +1529,7 @@ function Copy-OrderedDict($Src) {
     return $dst
 }
 
-function Build-MergeCfg($ExistingMerge, [string]$BaseUrl, [string]$ProviderProxy, [string]$Source) {
+function Build-MergeCfg($ExistingMerge, [string]$Cdn, [string]$ProviderProxy, [string]$Source, [string]$Mode = 'hybrid') {
     $cfg = Copy-OrderedDict $ExistingMerge
     if ($cfg.Contains('rules')) { $cfg.Remove('rules') }
 
@@ -1433,21 +1562,25 @@ function Build-MergeCfg($ExistingMerge, [string]$BaseUrl, [string]$ProviderProxy
     }
 
     $srcCfg = $script:RuleSources[$Source]
-    $providers = if ($cfg.Contains('rule-providers') -and ($cfg['rule-providers'] -is [System.Collections.IDictionary])) {
-        Copy-OrderedDict $cfg['rule-providers']
-    } else {
-        New-OrderedDict
+    # 仅保留用户自定义的非托管 provider，切换模式时自动清理另一模式未使用的托管规则集
+    $providers = New-OrderedDict
+    if ($cfg.Contains('rule-providers') -and ($cfg['rule-providers'] -is [System.Collections.IDictionary])) {
+        foreach ($entry in $cfg['rule-providers'].GetEnumerator()) {
+            $ek = [string]$entry.Key
+            if (-not $script:ManagedProviderNames.Contains($ek)) {
+                $providers[$ek] = $entry.Value
+            }
+        }
     }
 
-    foreach ($item in $srcCfg.providers) {
-        $pname = $item[0]
-        $relPath = $item[1]
-        $behavior = $item[2]
+    foreach ($item in $srcCfg.providers[$Mode]) {
+        $pname = [string]$item[0]
+        $behavior = [string]$item[2]
         $p = New-OrderedDict
         $p['type'] = 'http'
         $p['behavior'] = $behavior
         $p['format'] = $srcCfg.format
-        $p['url'] = $BaseUrl + $relPath
+        $p['url'] = Resolve-ProviderUrl $Source $Cdn $item
         $p['path'] = [string]::Format($srcCfg.path_tpl, $pname)
         $p['interval'] = [long]86400
         if (-not [string]::IsNullOrEmpty($ProviderProxy)) {
@@ -1459,9 +1592,9 @@ function Build-MergeCfg($ExistingMerge, [string]$BaseUrl, [string]$ProviderProxy
     return $cfg
 }
 
-function Build-RulesCfg([string]$Group, $SubRules, $ExistingRules, [bool]$ResetRules) {
+function Build-RulesCfg([string]$Group, $SubRules, $ExistingRules, [bool]$ResetRules, [string]$Mode = 'hybrid') {
     $managedPrepend = New-ObjList
-    foreach ($tpl in $script:RuleTemplates) {
+    foreach ($tpl in $script:RuleTemplates[$Mode]) {
         [void]$managedPrepend.Add($tpl.Replace('{group}', $Group))
     }
 
@@ -1481,6 +1614,7 @@ function Build-RulesCfg([string]$Group, $SubRules, $ExistingRules, [bool]$ResetR
         if ($ExistingRules.Contains('append') -and ($ExistingRules['append'] -is [System.Collections.IList])) {
             foreach ($r in $ExistingRules['append']) {
                 if (-not ($r -is [string]) -or [string]::IsNullOrWhiteSpace($r)) { continue }
+                if ($script:ManagedRuleKeys.Contains((Get-RuleKey $r))) { continue }
                 if ($seenAppend.Add($r)) { [void]$customAppend.Add($r) }
             }
         }
@@ -1504,10 +1638,12 @@ function Build-RulesCfg([string]$Group, $SubRules, $ExistingRules, [bool]$ResetR
     }
 }
 
-function Format-YamlWithHeader($Cfg, [string]$TitleLine, [string]$SourceLabel) {
+function Format-YamlWithHeader($Cfg, [string]$TitleLine, [string]$SourceLabel, [string]$Mode = 'hybrid') {
+    $modeLabel = if ($script:RuleModes.Contains($Mode)) { $script:RuleModes[$Mode] } else { $Mode }
     $header = @(
         '# ================================================================',
         "# $TitleLine",
+        "# 分流模式: $modeLabel",
         "# 规则源: $SourceLabel (RULE-SET，Clash 每日自动更新)",
         '# 还原方式: clash_rebuild_rules.bat --restore',
         '# ================================================================'
@@ -1605,9 +1741,9 @@ function Resolve-WebProxy([bool]$NoProxy) {
     return [System.Net.WebRequest]::GetSystemWebProxy()
 }
 
-function Invoke-PrefetchRulesets([string]$CfgDir, [string]$Source, [string]$BaseUrl, [bool]$NoProxy, [int]$TimeoutSec = 30) {
+function Invoke-PrefetchRulesets([string]$CfgDir, [string]$Source, [string]$Cdn, [string]$Mode, [bool]$NoProxy, [int]$TimeoutSec = 30) {
     $srcCfg = $script:RuleSources[$Source]
-    $providers = $srcCfg.providers
+    $providers = $srcCfg.providers[$Mode]
     $totalCount = $providers.Length
     $isTty = $false
     try { $isTty = -not [Console]::IsOutputRedirected } catch { $isTty = $false }
@@ -1615,7 +1751,7 @@ function Invoke-PrefetchRulesets([string]$CfgDir, [string]$Source, [string]$Base
     $empty = [string][char]0x2591  # ░
     $proxy = Resolve-WebProxy $NoProxy
 
-    Write-Host ("正在拉取规则集（共 {0} 份，源: {1}）:" -f $totalCount, $srcCfg.label) -ForegroundColor Cyan
+    Write-Host ("正在拉取规则集（共 {0} 份，模式: {1}，源: {2}）:" -f $totalCount, $Mode, $srcCfg.label) -ForegroundColor Cyan
     [long]$totalBytes = 0
     $okCount = 0
     $failed = New-Object 'System.Collections.Generic.List[object]'
@@ -1623,9 +1759,9 @@ function Invoke-PrefetchRulesets([string]$CfgDir, [string]$Source, [string]$Base
     $buffer = New-Object byte[] 16384
 
     for ($idx = 0; $idx -lt $totalCount; $idx++) {
-        $name = $providers[$idx][0]
-        $relPath = $providers[$idx][1]
-        $url = $BaseUrl + $relPath
+        $item = $providers[$idx]
+        $name = [string]$item[0]
+        $url = Resolve-ProviderUrl $Source $Cdn $item
         $relDst = [string]::Format($srcCfg.path_tpl, $name)
         $dstPath = [System.IO.Path]::GetFullPath((Join-Path $CfgDir $relDst))
         $dstDir = [System.IO.Path]::GetDirectoryName($dstPath)
@@ -1633,7 +1769,7 @@ function Invoke-PrefetchRulesets([string]$CfgDir, [string]$Source, [string]$Base
             [void][System.IO.Directory]::CreateDirectory($dstDir)
         }
         $tmpPath = $dstPath + '.tmp'
-        $prefix = '  [{0,2}/{1}] {2,-8}' -f ($idx + 1), $totalCount, $name
+        $prefix = '  [{0,2}/{1}] {2,-12}' -f ($idx + 1), $totalCount, $name
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $lastCols = 0
 
@@ -1803,7 +1939,7 @@ function Get-RemoteProfilesInfo([string]$CfgDir) {
 function Invoke-RebuildAction($Opts) {
     $cfgDir = Find-ConfigDir $Opts.Dir
     if ([string]::IsNullOrEmpty($cfgDir)) {
-        Write-Host '未找到有效的 Clash Verge 配置目录，请指定包含 profiles.yaml 的目录（--dir 或菜单 [8]）。' -ForegroundColor Red
+        Write-Host '未找到有效的 Clash Verge 配置目录，请指定包含 profiles.yaml 的目录（--dir 或菜单 [9]）。' -ForegroundColor Red
         return 1
     }
     Write-Host "配置目录: $cfgDir`n"
@@ -1856,6 +1992,7 @@ function Invoke-RebuildAction($Opts) {
     $srcCfg = $script:RuleSources[$Opts.Source]
     $baseUrl = if ($Opts.Cdn -ceq 'jsdelivr') { $srcCfg.cdn_base } else { $srcCfg.raw_base }
     if (-not $Opts.Restore) {
+        Write-Host ("分流模式: {0}" -f $script:RuleModes[$Opts.Mode])
         Write-Host ("规则集源: {0}" -f $srcCfg.label)
         Write-Host ("下载地址: {0}" -f $baseUrl)
         Write-Host ("下载经代理: {0}`n" -f $(if ($Opts.NoProxyDownload) { '否（--no-proxy-download）' } else { '是（走各订阅主代理组）' }))
@@ -1944,8 +2081,8 @@ function Invoke-RebuildAction($Opts) {
         $providerProxy = if ($Opts.NoProxyDownload) { '' } else { $group }
         $existingMerge = Load-YamlDict $mergePath
         $existingRules = Load-YamlDict $rulesPath
-        $mergeCfg = Build-MergeCfg $existingMerge $baseUrl $providerProxy $Opts.Source
-        $rulesBuild = Build-RulesCfg $group $subRules $existingRules $Opts.ResetRules
+        $mergeCfg = Build-MergeCfg $existingMerge $Opts.Cdn $providerProxy $Opts.Source $Opts.Mode
+        $rulesBuild = Build-RulesCfg $group $subRules $existingRules $Opts.ResetRules $Opts.Mode
         $rulesCfg = $rulesBuild.Config
         $keptCustom = $rulesBuild.KeptCustom
 
@@ -1953,8 +2090,8 @@ function Invoke-RebuildAction($Opts) {
             Write-Host ("  已保留界面自定义规则: {0} 条（位于模板规则之前，可开启重置选项清空）" -f $keptCustom) -ForegroundColor Green
         }
 
-        $mergeText = Format-YamlWithHeader $mergeCfg '由 clash_rebuild_rules.bat 生成：rule-providers 规则集数据源' $srcCfg.label
-        $rulesText = Format-YamlWithHeader $rulesCfg '由 clash_rebuild_rules.bat 生成：右键「编辑规则」前置分流规则' $srcCfg.label
+        $mergeText = Format-YamlWithHeader $mergeCfg '由 clash_rebuild_rules.bat 生成：rule-providers 规则集数据源' $srcCfg.label $Opts.Mode
+        $rulesText = Format-YamlWithHeader $rulesCfg '由 clash_rebuild_rules.bat 生成：右键「编辑规则」前置分流规则' $srcCfg.label $Opts.Mode
 
         Backup-AndWrite $mergePath $mergeText
         Backup-AndWrite $rulesPath $rulesText
@@ -1963,7 +2100,7 @@ function Invoke-RebuildAction($Opts) {
     }
 
     if (-not $Opts.Restore -and -not $Opts.SkipDownload -and $changed -gt 0) {
-        [void](Invoke-PrefetchRulesets $cfgDir $Opts.Source $baseUrl $Opts.NoProxyDownload)
+        [void](Invoke-PrefetchRulesets $cfgDir $Opts.Source $Opts.Cdn $Opts.Mode $Opts.NoProxyDownload)
     }
 
     Write-Host ('=' * 60)
@@ -1972,7 +2109,7 @@ function Invoke-RebuildAction($Opts) {
     } else {
         Write-Host ("完成，共更新 {0} 个订阅的 Merge + Rules 增强配置。" -f $changed) -ForegroundColor Green
         Write-Host '请回 Clash Verge 重新激活当前订阅（或点击刷新/重启内核）生效；右键订阅 ->「编辑规则」即可查看和修改规则。'
-        Write-Host '如需还原：再次打开本工具选择 [9] 还原备份，或运行 clash_rebuild_rules.bat --restore'
+        Write-Host '如需还原：再次打开本工具选择 [10] 还原备份，或运行 clash_rebuild_rules.bat --restore'
     }
     return 0
 }
@@ -1981,10 +2118,11 @@ function Invoke-RebuildAction($Opts) {
 # 交互式菜单界面（双击运行，纯数字选择，与 clash_rebuild_rules.py 功能一一对应）
 # ==============================================================================
 
-function New-RunOpts([string]$Dir) {
+function New-RunOpts([string]$Dir, [string]$Mode = 'hybrid') {
     return [PSCustomObject]@{
         Dir             = $Dir
         Restore         = $false
+        Mode            = $Mode
         Source          = 'loyalsoldier'
         Cdn             = 'raw'
         SkipDownload    = $false
@@ -2137,6 +2275,7 @@ function Prompt-Group($Opts, $Scan) {
 function Invoke-InteractiveMenu($InitialOpts = $null) {
     try { $Host.UI.RawUI.WindowTitle = 'Clash Verge 分流规则重建工具 (免 Python 版)' } catch {}
     $customDir = if ($null -ne $InitialOpts) { $InitialOpts.Dir } else { $null }
+    $currentMode = if ($null -ne $InitialOpts -and -not [string]::IsNullOrEmpty($InitialOpts.Mode)) { $InitialOpts.Mode } else { 'hybrid' }
 
     while ($true) {
         Clear-ConsoleSafe
@@ -2155,30 +2294,32 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 Write-Host '  远程订阅 : 0 个（profiles.yaml 中未发现 remote 订阅）' -ForegroundColor Yellow
             }
         } else {
-            Write-Host '  配置目录 : 未自动检测到（请选择 [8] 手动指定）' -ForegroundColor Yellow
+            Write-Host '  配置目录 : 未自动检测到（请选择 [9] 手动指定）' -ForegroundColor Yellow
         }
+        Write-Host ('  分流模式 : ' + $script:RuleModes[$currentMode]) -ForegroundColor Cyan
 
         Write-Host '----------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host '  请选择要执行的功能（输入数字回车）:' -ForegroundColor White
-        Write-Host '    [1] 正式写入并预拉取规则集         (默认应用)'
-        Write-Host '    [2] 使用 MetaCubeX 二进制 .mrs 源  (--source metacubex)'
-        Write-Host '    [3] 仅写入配置，不预拉取规则集     (--skip-download)'
-        Write-Host '    [4] 指定订阅 / 指定主代理组        (--profile / --group)'
-        Write-Host '    [5] 重置规则为默认模板             (--reset-rules)'
-        Write-Host '    [6] 使用 jsDelivr CDN 镜像拉取     (--cdn jsdelivr)'
-        Write-Host '    [7] 下载规则集不走代理（直连）     (--no-proxy-download)'
-        Write-Host '    [8] 手动指定配置目录               (--dir)'
-        Write-Host '    [9] 还原 .bak 备份                 (--restore)'
+        Write-Host '    [1] 正式写入并预拉取规则集         (按当前模式，YAML 源)'
+        Write-Host '    [2] 使用 MetaCubeX 二进制 .mrs 源  (--source metacubex，低内存)'
+        Write-Host '    [3] 切换分流模式 (混合 / 黑名单 / 白名单) (--mode)'
+        Write-Host '    [4] 仅写入配置，不预拉取规则集     (--skip-download)'
+        Write-Host '    [5] 指定订阅 / 指定主代理组        (--profile / --group)'
+        Write-Host '    [6] 重置规则为默认模板             (--reset-rules)'
+        Write-Host '    [7] 使用 jsDelivr CDN 镜像拉取     (--cdn jsdelivr)'
+        Write-Host '    [8] 下载规则集不走代理（直连）     (--no-proxy-download)'
+        Write-Host '    [9] 手动指定配置目录               (--dir)'
+        Write-Host '   [10] 还原 .bak 备份                 (--restore)'
         Write-Host '    [0] 退出' -ForegroundColor DarkGray
         Write-Host '================================================================' -ForegroundColor Cyan
 
-        $choice = Read-MenuInput '请输入数字 (0-9)'
+        $choice = Read-MenuInput '请输入数字 (0-10)'
         if ($null -eq $choice) { return 0 }
 
         switch ($choice) {
             '1' {
                 Write-Host ''
-                $opts = New-RunOpts $customDir
+                $opts = New-RunOpts $customDir $currentMode
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
@@ -2188,14 +2329,14 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 Write-Host '  [1] GitHub 原始地址（默认直接回车）'
                 Write-Host '  [2] jsDelivr CDN 镜像 (--cdn jsdelivr)'
                 Write-Host '  [0] 返回主菜单'
-                $mode = Read-MenuInput '请选择 (0-2)'
-                if ($null -eq $mode) { return 0 }
-                if ($mode -ceq '0') { continue }
-                $opts = New-RunOpts $customDir
+                $sub = Read-MenuInput '请选择 (0-2)'
+                if ($null -eq $sub) { return 0 }
+                if ($sub -ceq '0') { continue }
+                $opts = New-RunOpts $customDir $currentMode
                 $opts.Source = 'metacubex'
-                if ($mode -ceq '2') { $opts.Cdn = 'jsdelivr' }
-                elseif ($mode -cne '' -and $mode -cne '1') {
-                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
+                if ($sub -ceq '2') { $opts.Cdn = 'jsdelivr' }
+                elseif ($sub -cne '' -and $sub -cne '1') {
+                    Write-Host "无效选项: $sub" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
                     continue
                 }
@@ -2205,66 +2346,104 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
             }
             '3' {
                 Write-Host ''
-                $opts = New-RunOpts $customDir
+                Write-Host '选择分流模式:' -ForegroundColor Cyan
+                Write-Host '  [1] 混合模式   (推荐：浏览器海外兜底走代理 + 后台/系统/工具兜底直连)'
+                Write-Host '  [2] 黑名单模式 (全局 MATCH,DIRECT，仅被墙/Google/AI/Telegram 走代理)'
+                Write-Host '  [3] 白名单模式 (全局 MATCH,PROXY，国内/Bing/Steam/Qoder/Trae CDN 直连)'
+                Write-Host '  [0] 返回主菜单'
+                $pick = Read-MenuInput '请选择 (0-3)'
+                if ($null -eq $pick) { return 0 }
+                if ($pick -ceq '0' -or $pick -ceq '') { continue }
+                if ($pick -ceq '1') { $currentMode = 'hybrid' }
+                elseif ($pick -ceq '2') { $currentMode = 'blacklist' }
+                elseif ($pick -ceq '3') { $currentMode = 'whitelist' }
+                else {
+                    Write-Host "无效选项: $pick" -ForegroundColor Yellow
+                    Start-Sleep -Milliseconds 700
+                    continue
+                }
+                Write-Host ('已切换为: ' + $script:RuleModes[$currentMode]) -ForegroundColor Green
+                Write-Host '  [1] 立即使用 MetaCubeX (.mrs + jsDelivr) 写入生效'
+                Write-Host '  [2] 立即使用 Loyalsoldier (YAML) 写入生效'
+                Write-Host '  [0] 返回主菜单（默认直接回车）'
+                $act = Read-MenuInput '请选择 (0-2)'
+                if ($null -eq $act) { return 0 }
+                if ($act -ceq '1') {
+                    Write-Host ''
+                    $opts = New-RunOpts $customDir $currentMode
+                    $opts.Source = 'metacubex'
+                    $opts.Cdn = 'jsdelivr'
+                    [void](Invoke-RebuildAction $opts)
+                    Pause-ForMenu
+                } elseif ($act -ceq '2') {
+                    Write-Host ''
+                    $opts = New-RunOpts $customDir $currentMode
+                    [void](Invoke-RebuildAction $opts)
+                    Pause-ForMenu
+                }
+            }
+            '4' {
+                Write-Host ''
+                $opts = New-RunOpts $customDir $currentMode
                 $opts.SkipDownload = $true
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
-            '4' {
-                $opts = New-RunOpts $customDir
+            '5' {
+                $opts = New-RunOpts $customDir $currentMode
                 if (-not (Prompt-Profiles $opts $scan)) { return 0 }
                 if (-not (Prompt-Group $opts $scan)) { return 0 }
                 Write-Host ''
                 Write-Host '  [1] 正式写入并预拉取规则集（默认直接回车）'
                 Write-Host '  [2] 仅写入配置，不预拉取规则集 (--skip-download)'
                 Write-Host '  [0] 返回主菜单'
-                $mode = Read-MenuInput '请选择执行方式 (0-2)'
-                if ($null -eq $mode) { return 0 }
-                if ($mode -ceq '0') { continue }
-                if ($mode -ceq '2') { $opts.SkipDownload = $true }
-                elseif ($mode -cne '' -and $mode -cne '1') {
-                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
+                $sub = Read-MenuInput '请选择执行方式 (0-2)'
+                if ($null -eq $sub) { return 0 }
+                if ($sub -ceq '0') { continue }
+                if ($sub -ceq '2') { $opts.SkipDownload = $true }
+                elseif ($sub -cne '' -and $sub -cne '1') {
+                    Write-Host "无效选项: $sub" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
                     continue
                 }
-                Write-Host ''
-                [void](Invoke-RebuildAction $opts)
-                Pause-ForMenu
-            }
-            '5' {
-                Write-Host ''
-                Write-Host '提示：--reset-rules 会重置 Rules 增强为模板默认规则，清空界面手工新增的自定义规则。' -ForegroundColor Yellow
-                Write-Host '  [1] 确认重置并写入'
-                Write-Host '  [0] 返回主菜单（默认直接回车）'
-                $mode = Read-MenuInput '请选择 (0-1)'
-                if ($null -eq $mode) { return 0 }
-                if ($mode -ceq '' -or $mode -ceq '0') { continue }
-                if ($mode -cne '1') {
-                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
-                    Start-Sleep -Milliseconds 700
-                    continue
-                }
-                $opts = New-RunOpts $customDir
-                $opts.ResetRules = $true
                 Write-Host ''
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '6' {
                 Write-Host ''
-                $opts = New-RunOpts $customDir
-                $opts.Cdn = 'jsdelivr'
+                Write-Host '提示：--reset-rules 会重置 Rules 增强为模板默认规则，清空界面手工新增的自定义规则。' -ForegroundColor Yellow
+                Write-Host '  [1] 确认重置并写入'
+                Write-Host '  [0] 返回主菜单（默认直接回车）'
+                $sub = Read-MenuInput '请选择 (0-1)'
+                if ($null -eq $sub) { return 0 }
+                if ($sub -ceq '' -or $sub -ceq '0') { continue }
+                if ($sub -cne '1') {
+                    Write-Host "无效选项: $sub" -ForegroundColor Yellow
+                    Start-Sleep -Milliseconds 700
+                    continue
+                }
+                $opts = New-RunOpts $customDir $currentMode
+                $opts.ResetRules = $true
+                Write-Host ''
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '7' {
                 Write-Host ''
-                $opts = New-RunOpts $customDir
-                $opts.NoProxyDownload = $true
+                $opts = New-RunOpts $customDir $currentMode
+                $opts.Cdn = 'jsdelivr'
                 [void](Invoke-RebuildAction $opts)
                 Pause-ForMenu
             }
             '8' {
+                Write-Host ''
+                $opts = New-RunOpts $customDir $currentMode
+                $opts.NoProxyDownload = $true
+                [void](Invoke-RebuildAction $opts)
+                Pause-ForMenu
+            }
+            '9' {
                 Write-Host ''
                 Write-Host '提示：可直接将 Clash Verge 配置目录拖入窗口（目录内需有 profiles.yaml），直接回车恢复自动识别。' -ForegroundColor DarkGray
                 $rawDir = Read-MenuInput '请输入配置目录路径'
@@ -2287,25 +2466,25 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
                 if ($null -eq $sub) { return 0 }
                 if ($sub -ceq '1') {
                     Write-Host ''
-                    $opts = New-RunOpts $customDir
+                    $opts = New-RunOpts $customDir $currentMode
                     [void](Invoke-RebuildAction $opts)
                     Pause-ForMenu
                 }
             }
-            '9' {
+            '10' {
                 Write-Host ''
                 Write-Host '提示：将用首次生成的 .bak 备份覆盖还原所有订阅的 Merge 与 Rules 文件。' -ForegroundColor Yellow
                 Write-Host '  [1] 确认还原备份 (--restore)'
                 Write-Host '  [0] 返回主菜单（默认直接回车）'
-                $mode = Read-MenuInput '请选择 (0-1)'
-                if ($null -eq $mode) { return 0 }
-                if ($mode -ceq '' -or $mode -ceq '0') { continue }
-                if ($mode -cne '1') {
-                    Write-Host "无效选项: $mode" -ForegroundColor Yellow
+                $sub = Read-MenuInput '请选择 (0-1)'
+                if ($null -eq $sub) { return 0 }
+                if ($sub -ceq '' -or $sub -ceq '0') { continue }
+                if ($sub -cne '1') {
+                    Write-Host "无效选项: $sub" -ForegroundColor Yellow
                     Start-Sleep -Milliseconds 700
                     continue
                 }
-                $opts = New-RunOpts $customDir
+                $opts = New-RunOpts $customDir $currentMode
                 $opts.Restore = $true
                 $opts.SkipDownload = $true
                 Write-Host ''
@@ -2314,7 +2493,7 @@ function Invoke-InteractiveMenu($InitialOpts = $null) {
             }
             '0' { return 0 }
             default {
-                Write-Host "无效选项: $choice（请输入 0-9 的数字）" -ForegroundColor Yellow
+                Write-Host "无效选项: $choice（请输入 0-10 的数字）" -ForegroundColor Yellow
                 Start-Sleep -Milliseconds 700
             }
         }
@@ -2333,6 +2512,7 @@ function Show-CliHelp {
 
 常用选项:
   --apply                  直接以默认参数执行正式写入（命令行无其它标志时使用）
+  --mode <模式>            分流模式：hybrid（默认，浏览器代理+后台直连）、blacklist（纯黑名单）或 whitelist（白名单）
   --source <源>            规则集源：loyalsoldier（默认 YAML）或 metacubex（.mrs 低内存）
   --skip-download          只写入配置文件，不预先拉取规则集到本地缓存
   --profile <名称/uid>     仅处理指定订阅（可重复指定）
@@ -2352,6 +2532,7 @@ function Parse-CliArgs([System.Collections.Generic.List[string]]$ArgList) {
         OpenMenu        = $false
         Dir             = $null
         Restore         = $false
+        Mode            = 'hybrid'
         Source          = 'loyalsoldier'
         Cdn             = 'raw'
         SkipDownload    = $false
@@ -2380,6 +2561,14 @@ function Parse-CliArgs([System.Collections.Generic.List[string]]$ArgList) {
             '--skip-download'     { $opts.SkipDownload = $true }
             '--no-proxy-download' { $opts.NoProxyDownload = $true }
             '--reset-rules'       { $opts.ResetRules = $true }
+            '--mode' {
+                $mv = if ($null -ne $valInline) { $valInline } elseif (($i + 1) -lt $ArgList.Count) { $i++; $ArgList[$i] } else { $null }
+                if ($null -eq $mv -or -not $script:RuleModes.Contains($mv)) {
+                    $opts.Error = "--mode 仅支持: $($script:RuleModes.Keys -join ', ')"
+                    return $opts
+                }
+                $opts.Mode = $mv
+            }
             '--dir' {
                 if ($null -ne $valInline) { $opts.Dir = $valInline }
                 elseif (($i + 1) -lt $ArgList.Count) { $i++; $opts.Dir = $ArgList[$i] }

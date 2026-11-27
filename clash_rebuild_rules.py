@@ -11,7 +11,11 @@
      - find-process-mode: 默认补齐为 always（已有自定义值则保留），让 Clash Verge「连接」页与流量监控插件可识别进程名
      - 保留 Merge 文件中用户原有的其它配置项（如 tun/profile/sniffer 等），并移除旧版遗留的 rules 字段
   2. 规则(Rules)增强（即 Clash Verge 右键订阅 ->「编辑规则」所读写的配置）:
-     - prepend: 完整的分流规则（含 Bing/Steam/Qoder/Trae CDN 直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
+     - prepend: 完整的分流规则，支持三种模式：
+         * hybrid（默认，混合分层）：国内/微软 CN/Bing/Steam/Qoder/Trae CDN 直连，Google/AI/GFW/Telegram 全局代理，浏览器未命中国内规则的冷门海外站自动兜底代理，非浏览器后台/系统/工具兜底 MATCH,DIRECT 防偷跑
+         * blacklist（纯黑名单/极简省流量）：仅被墙(gfw)/Google/海外 AI/Telegram/CF 人机验证走代理，其余全部 MATCH,DIRECT 默认直连
+         * whitelist（白名单/全兜底）：国内/Bing/Steam/Qoder/Trae CDN/CN IP 直连，其余全部 MATCH,PROXY 走代理
+       重跑或切换模式时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
      - delete:  标记删除订阅自带的旧规则（界面上显示删除线，运行时不再冗余保留）
 
 为什么拆成 Merge + Rules 增强
@@ -22,13 +26,15 @@
 安全性
 ------
 - 每个 Merge / Rules 文件首次修改前备份为 <file>.bak（保留原始模板/内容，用于还原）。
-- 结尾有 MATCH→代理组 兜底：即使远程订阅更新新增了未在 delete 中的规则，也会被 MATCH 提前截获。
+- 结尾有 MATCH 兜底（hybrid/blacklist 为 MATCH→DIRECT，whitelist 为 MATCH→代理组）：即使远程订阅更新新增了未在 delete 中的规则，也会被 MATCH 提前截获。
 - --restore 用 .bak 还原所有订阅的 Merge 和 Rules 文件。
 
 用法
 ----
-  python clash_rebuild_rules.py                      # 应用（默认 Loyalsoldier YAML 源）
+  python clash_rebuild_rules.py                      # 应用（默认 hybrid 混合模式 + Loyalsoldier YAML 源）
   python clash_rebuild_rules.py --source metacubex   # 使用 MetaCubeX 二进制 .mrs 规则集（体积小、低内存，需 Mihomo 内核）
+  python clash_rebuild_rules.py --mode blacklist     # 切换为纯黑名单模式（全局 MATCH,DIRECT）
+  python clash_rebuild_rules.py --mode whitelist     # 切换为白名单模式（全局 MATCH,PROXY 兜底）
   python clash_rebuild_rules.py --skip-download      # 只写配置文件，不预先拉取规则集
   python clash_rebuild_rules.py --profile 订阅名      # 仅处理指定订阅（可重复指定）
   python clash_rebuild_rules.py --group 节点选择      # 手动指定目标主代理组名
@@ -54,8 +60,14 @@ try:
 except ImportError:
     sys.exit('缺少 PyYAML，请先运行: pip install pyyaml')
 
-# ---------------- 规则源 ----------------
-# (provider 名, 相对路径, behavior)
+# ---------------- 分流模式与规则源 ----------------
+RULE_MODES = {
+    'hybrid':    '混合模式 (浏览器海外兜底走代理 + 后台/系统/工具兜底直连，推荐)',
+    'blacklist': '黑名单模式 (MATCH,DIRECT，全局默认直连，仅被墙/Google/AI/Telegram 走代理)',
+    'whitelist': '白名单模式 (MATCH,PROXY，全局默认代理，国内与常用 CDN 直连)',
+}
+
+# 每项格式: (provider 名, 相对路径, behavior[, 覆盖源名])
 RULE_SOURCES = {
     'loyalsoldier': {
         'label': 'Loyalsoldier/clash-rules (YAML)',
@@ -63,18 +75,44 @@ RULE_SOURCES = {
         'path_tpl': './ruleset/clashrules_%s.yaml',
         'raw_base': 'https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/',
         'cdn_base': 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/',
-        'providers': [
-            ('private', 'private.txt', 'domain'),   # 私有/局域网域名
-            ('reject',  'reject.txt',  'domain'),   # 广告/跟踪域名 -> REJECT
-            ('icloud',  'icloud.txt',  'domain'),   # iCloud 直连
-            ('apple',   'apple.txt',   'domain'),   # Apple 国内 CDN 直连
-            ('google',  'google.txt',  'domain'),   # Google 大陆可直连域名（此处强制拉回代理）
-            ('gfw',     'gfw.txt',     'domain'),   # GFW 被墙域名清单
-            ('direct',  'direct.txt',  'domain'),   # 国内直连域名与下载 CDN 清单
-            ('proxy',   'proxy.txt',   'domain'),   # 海外常见代理清单（Claude/OpenAI/GitHub/Cursor 等）
-            ('lancidr', 'lancidr.txt', 'ipcidr'),   # 局域网/保留网段
-            ('cncidr',  'cncidr.txt',  'ipcidr'),   # 中国大陆 IP
-        ],
+        'providers': {
+            'hybrid': [
+                ('private',      'private.txt',                      'domain'),               # 私有/局域网域名
+                ('reject',       'reject.txt',                       'domain'),               # 广告/跟踪域名 -> REJECT
+                ('icloud',       'icloud.txt',                       'domain'),               # iCloud 直连
+                ('apple',        'apple.txt',                        'domain'),               # Apple 国内 CDN 直连
+                ('google',       'google.txt',                       'domain'),               # Google 大陆可直连域名强制走代理
+                ('ai',           'geo/geosite/category-ai-!cn.yaml', 'domain', 'metacubex'),  # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot 等）
+                ('gfw',          'gfw.txt',                          'domain'),               # GFW 被墙域名清单
+                ('telegram',     'geo/geosite/telegram.yaml',        'domain', 'metacubex'),  # Telegram 域名
+                ('telegramcidr', 'telegramcidr.txt',                 'ipcidr'),               # Telegram 纯 IP 段
+                ('microsoftcn',  'geo/geosite/microsoft@cn.yaml',    'domain', 'metacubex'),  # 微软中国/Windows 更新与 CN 服务
+                ('direct',       'direct.txt',                       'domain'),               # 国内直连域名与下载 CDN 清单
+                ('lancidr',      'lancidr.txt',                      'ipcidr'),               # 局域网/保留网段
+                ('cncidr',       'cncidr.txt',                       'ipcidr'),               # 中国大陆 IP
+            ],
+            'blacklist': [
+                ('private',      'private.txt',                     'domain'),               # 私有/局域网域名
+                ('reject',       'reject.txt',                      'domain'),               # 广告/跟踪域名 -> REJECT
+                ('google',       'google.txt',                      'domain'),               # Google 大陆可直连域名强制走代理
+                ('gfw',          'gfw.txt',                         'domain'),               # GFW 被墙域名清单
+                ('ai',           'geo/geosite/category-ai-!cn.yaml','domain', 'metacubex'),  # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot 等）
+                ('telegram',     'geo/geosite/telegram.yaml',       'domain', 'metacubex'),  # Telegram 域名
+                ('telegramcidr', 'telegramcidr.txt',                'ipcidr'),               # Telegram 纯 IP 段
+            ],
+            'whitelist': [
+                ('private', 'private.txt', 'domain'),   # 私有/局域网域名
+                ('reject',  'reject.txt',  'domain'),   # 广告/跟踪域名 -> REJECT
+                ('icloud',  'icloud.txt',  'domain'),   # iCloud 直连
+                ('apple',   'apple.txt',   'domain'),   # Apple 国内 CDN 直连
+                ('google',  'google.txt',  'domain'),   # Google 大陆可直连域名（此处强制拉回代理）
+                ('gfw',     'gfw.txt',     'domain'),   # GFW 被墙域名清单
+                ('direct',  'direct.txt',  'domain'),   # 国内直连域名与下载 CDN 清单
+                ('proxy',   'proxy.txt',   'domain'),   # 海外常见代理清单（Claude/OpenAI/GitHub/Cursor 等）
+                ('lancidr', 'lancidr.txt', 'ipcidr'),   # 局域网/保留网段
+                ('cncidr',  'cncidr.txt',  'ipcidr'),   # 中国大陆 IP
+            ],
+        },
     },
     'metacubex': {
         'label': 'MetaCubeX/meta-rules-dat (MRS 二进制，低内存)',
@@ -82,55 +120,136 @@ RULE_SOURCES = {
         'path_tpl': './ruleset/metacubex_%s.mrs',
         'raw_base': 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/',
         'cdn_base': 'https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/',
-        'providers': [
-            ('private', 'geo/geosite/private.mrs',          'domain'),  # 私有/局域网域名
-            ('reject',  'geo/geosite/category-ads-all.mrs', 'domain'),  # 广告/跟踪域名 -> REJECT
-            ('icloud',  'geo/geosite/icloud.mrs',           'domain'),  # iCloud 直连
-            ('apple',   'geo/geosite/apple-cn.mrs',         'domain'),  # Apple 国内 CDN 直连
-            ('google',  'geo/geosite/google.mrs',           'domain'),  # Google 全量域名走代理
-            ('gfw',     'geo/geosite/gfw.mrs',              'domain'),  # GFW 被墙域名清单
-            ('direct',  'geo/geosite/cn.mrs',               'domain'),  # 国内直连域名清单
-            ('proxy',   'geo/geosite/geolocation-!cn.mrs',  'domain'),  # 非大陆海外常见服务清单
-            ('lancidr', 'geo/geoip/private.mrs',            'ipcidr'),  # 局域网/保留网段
-            ('cncidr',  'geo/geoip/cn.mrs',                 'ipcidr'),  # 中国大陆 IP
-        ],
+        'providers': {
+            'hybrid': [
+                ('private',      'geo/geosite/private.mrs',          'domain'),  # 私有/局域网域名
+                ('reject',       'geo/geosite/category-ads-all.mrs', 'domain'),  # 广告/跟踪域名 -> REJECT
+                ('icloud',       'geo/geosite/icloud.mrs',           'domain'),  # iCloud 直连
+                ('apple',        'geo/geosite/apple-cn.mrs',         'domain'),  # Apple 国内 CDN 直连
+                ('google',       'geo/geosite/google.mrs',           'domain'),  # Google 全量域名走代理
+                ('ai',           'geo/geosite/category-ai-!cn.mrs',  'domain'),  # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot 等）
+                ('gfw',          'geo/geosite/gfw.mrs',              'domain'),  # GFW 被墙域名清单
+                ('telegram',     'geo/geosite/telegram.mrs',         'domain'),  # Telegram 域名
+                ('telegramcidr', 'geo/geoip/telegram.mrs',           'ipcidr'),  # Telegram 纯 IP 段
+                ('microsoftcn',  'geo/geosite/microsoft@cn.mrs',     'domain'),  # 微软中国/Windows 更新与 CN 服务
+                ('direct',       'geo/geosite/cn.mrs',               'domain'),  # 国内直连域名清单
+                ('lancidr',      'geo/geoip/private.mrs',            'ipcidr'),  # 局域网/保留网段
+                ('cncidr',       'geo/geoip/cn.mrs',                 'ipcidr'),  # 中国大陆 IP
+            ],
+            'blacklist': [
+                ('private',      'geo/geosite/private.mrs',          'domain'),  # 私有/局域网域名
+                ('reject',       'geo/geosite/category-ads-all.mrs', 'domain'),  # 广告/跟踪域名 -> REJECT
+                ('google',       'geo/geosite/google.mrs',           'domain'),  # Google 全量域名走代理
+                ('gfw',          'geo/geosite/gfw.mrs',              'domain'),  # GFW 被墙域名清单
+                ('ai',           'geo/geosite/category-ai-!cn.mrs',  'domain'),  # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot 等）
+                ('telegram',     'geo/geosite/telegram.mrs',         'domain'),  # Telegram 域名
+                ('telegramcidr', 'geo/geoip/telegram.mrs',           'ipcidr'),  # Telegram 纯 IP 段
+            ],
+            'whitelist': [
+                ('private', 'geo/geosite/private.mrs',          'domain'),  # 私有/局域网域名
+                ('reject',  'geo/geosite/category-ads-all.mrs', 'domain'),  # 广告/跟踪域名 -> REJECT
+                ('icloud',  'geo/geosite/icloud.mrs',           'domain'),  # iCloud 直连
+                ('apple',   'geo/geosite/apple-cn.mrs',         'domain'),  # Apple 国内 CDN 直连
+                ('google',  'geo/geosite/google.mrs',           'domain'),  # Google 全量域名走代理
+                ('gfw',     'geo/geosite/gfw.mrs',              'domain'),  # GFW 被墙域名清单
+                ('direct',  'geo/geosite/cn.mrs',               'domain'),  # 国内直连域名清单
+                ('proxy',   'geo/geosite/geolocation-!cn.mrs',  'domain'),  # 非大陆海外常见服务清单
+                ('lancidr', 'geo/geoip/private.mrs',            'ipcidr'),  # 局域网/保留网段
+                ('cncidr',  'geo/geoip/cn.mrs',                 'ipcidr'),  # 中国大陆 IP
+            ],
+        },
     },
 }
 
 RAW_BASE = RULE_SOURCES['loyalsoldier']['raw_base']
 CDN_BASE = RULE_SOURCES['loyalsoldier']['cdn_base']
-PROVIDERS = RULE_SOURCES['loyalsoldier']['providers']
+PROVIDERS = RULE_SOURCES['loyalsoldier']['providers']['hybrid']
 
 # 完整规则，第一命中生效。{group} 替换成各订阅自己的主代理组名。
-RULE_TEMPLATES = [
-    'RULE-SET,private,DIRECT',
-    'DOMAIN-SUFFIX,gvt2.com,{group}',        # 放行 Google/Chrome 组件下载（避免被 reject 误杀）
-    'DOMAIN,statsig.anthropic.com,{group}',  # 放行 Claude 特性开关（避免被 reject 误杀）
-    'RULE-SET,reject,REJECT',
-    'DOMAIN-SUFFIX,bing.com,DIRECT',         # Bing 国内搜索直连（置于 reject 后保留广告拦截，置于 gfw/proxy 前防走代理）
-    'DOMAIN-SUFFIX,bing.net,DIRECT',         # Bing 静态资源/缩略图 CDN 直连
-    'DOMAIN-SUFFIX,bingapis.com,DIRECT',     # Bing 搜索联想 API 直连
-    'DOMAIN-SUFFIX,bingj.com,DIRECT',        # Bing 网页快照直连
-    'DOMAIN-SUFFIX,steamcontent.com,DIRECT', # Steam 游戏本体/更新核心下载 CDN 直连（防落入 proxy 跑代理流量）
-    'DOMAIN-SUFFIX,steamserver.net,DIRECT',  # Steam 客户端 CM 连接直连（防被误判到海外下载节点）
-    'DOMAIN-SUFFIX,steamchina.com,DIRECT',   # Steam 国区阿里/腾讯/网宿下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
-    'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',  # Steam 国内下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
-    'DOMAIN,steampipe.akamaized.net,DIRECT', # Akamai SteamPipe 游戏内容分发直连
-    'DOMAIN-SUFFIX,qoder.sh,DIRECT',         # Qoder API/OpenAPI 域名直连（阿里云海外节点国内可直连，防 AI 对话跑代理流量）
-    'DOMAIN-SUFFIX,traecdn.us,DIRECT',       # Trae 国际版安装包/静态资源 CDN 直连（防大文件下载/更新走代理兜底）
-    'RULE-SET,icloud,DIRECT',
-    'RULE-SET,apple,DIRECT',
-    'RULE-SET,google,{group}',               # Google 大陆可直连域名强制走代理
-    'DOMAIN-SUFFIX,gstatic.cn,{group}',      # Google gstatic.cn 强制走代理（避免命中 direct 的 +.cn）
-    'RULE-SET,gfw,{group}',                  # 被墙域名走代理（优先于 direct）
-    'RULE-SET,direct,DIRECT',                # 国内网站与微软/驱动/游戏下载 CDN 直连（优先于 proxy 防跑流量）
-    'RULE-SET,proxy,{group}',                # 海外服务走代理（Claude/OpenAI/GitHub/Cursor 等，免本地 DNS 解析）
-    'RULE-SET,lancidr,DIRECT,no-resolve',
-    'RULE-SET,cncidr,DIRECT,no-resolve',
-    'GEOIP,LAN,DIRECT',                      # 解析为私网 IP 的内网域名直连兜底（Mihomo 内置特判 lan，兼容 MMDB/geodata）
-    'GEOIP,CN,DIRECT',
-    'MATCH,{group}',                         # 其余全部走代理（兜底）
-]
+RULE_TEMPLATES = {
+    'hybrid': [
+        'RULE-SET,private,DIRECT',                         # 局域网 / 私有域名直连
+        'DOMAIN-SUFFIX,gvt2.com,{group}',                  # 放行 Google/Chrome 组件下载（避免被 reject 误杀）
+        'DOMAIN,statsig.anthropic.com,{group}',            # 放行 Claude 特性开关（避免被 reject 误杀）
+        'RULE-SET,reject,REJECT',                          # 广告/追踪域名拦截
+        'DOMAIN-SUFFIX,bing.com,DIRECT',                   # Bing 国内搜索直连
+        'DOMAIN-SUFFIX,bing.net,DIRECT',                   # Bing 静态资源/缩略图 CDN 直连
+        'DOMAIN-SUFFIX,bingapis.com,DIRECT',               # Bing 搜索联想 API 直连
+        'DOMAIN-SUFFIX,bingj.com,DIRECT',                  # Bing 网页快照直连
+        'DOMAIN-SUFFIX,steamcontent.com,DIRECT',           # Steam 游戏本体/更新核心下载 CDN 直连
+        'DOMAIN-SUFFIX,steamserver.net,DIRECT',            # Steam 客户端 CM 连接直连
+        'DOMAIN-SUFFIX,steamchina.com,DIRECT',             # Steam 国区阿里/腾讯/网宿下载 CDN 直连
+        'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',      # Steam 国内下载 CDN 直连
+        'DOMAIN,steampipe.akamaized.net,DIRECT',           # Akamai SteamPipe 游戏内容分发直连
+        'DOMAIN-SUFFIX,qoder.sh,DIRECT',                   # Qoder API/OpenAPI 域名直连
+        'DOMAIN-SUFFIX,traecdn.us,DIRECT',                 # Trae 国际版安装包/静态资源 CDN 直连
+        'RULE-SET,icloud,DIRECT',                          # iCloud 直连
+        'RULE-SET,apple,DIRECT',                           # Apple 国内 CDN 直连
+        'RULE-SET,google,{group}',                         # Google 全家桶（含 Antigravity / YouTube / gstatic 等）走代理
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',                # Google gstatic.cn 强制走代理
+        'RULE-SET,ai,{group}',                             # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot/Gemini 等）走代理
+        'RULE-SET,gfw,{group}',                            # GFW 被墙域名（GitHub/X/Reddit/Discord/Linux.do/Steam 商店社区等）走代理
+        'RULE-SET,telegram,{group}',                       # Telegram 域名走代理
+        'DOMAIN-SUFFIX,challenges.cloudflare.com,{group}', # Cloudflare 人机验证走代理，避免与代理站点出口 IP 不一致导致 Turnstile 失败
+        'RULE-SET,telegramcidr,{group},no-resolve',        # Telegram 纯 IP 连接走代理（免 DNS 解析）
+        'RULE-SET,microsoftcn,DIRECT',                     # 微软中国/Windows 更新与 CN 服务直连（置于 gfw/ai 之后，不误伤 Copilot/OneDrive）
+        'RULE-SET,direct,DIRECT',                          # 国内网站与常用下载 CDN 直连（优先于浏览器海外兜底）
+        'RULE-SET,lancidr,DIRECT,no-resolve',              # 局域网/保留网段直连
+        'RULE-SET,cncidr,DIRECT,no-resolve',               # 中国大陆 IP 段直连
+        'GEOIP,LAN,DIRECT',                                # 解析为私网 IP 的内网域名直连兜底
+        'GEOIP,CN,DIRECT',                                 # 解析为国内 IP 的域名直连兜底
+        'PROCESS-NAME,chrome.exe,{group}',                 # Chrome 浏览器剩余海外站自动走代理（解决未入表冷门海外站连不上）
+        'PROCESS-NAME,msedge.exe,{group}',                 # Edge 浏览器剩余海外站自动走代理
+        'PROCESS-NAME,ego.exe,{group}',                    # Ego 浏览器剩余海外站自动走代理
+        'PROCESS-NAME,firefox.exe,{group}',                # Firefox 浏览器剩余海外站自动走代理
+        'PROCESS-NAME,brave.exe,{group}',                  # Brave 浏览器剩余海外站自动走代理
+        'PROCESS-NAME,arc.exe,{group}',                    # Arc 浏览器剩余海外站自动走代理
+        'MATCH,DIRECT',                                    # 非浏览器/系统/后台/开发工具其余未命中流量全部直连，杜绝偷跑代理流量
+    ],
+    'blacklist': [
+        'RULE-SET,private,DIRECT',                         # 局域网 / 私有域名直连
+        'DOMAIN-SUFFIX,gvt2.com,{group}',                  # 放行 Google/Chrome 组件下载（避免被 reject 误杀）
+        'DOMAIN,statsig.anthropic.com,{group}',            # 放行 Claude 特性开关（避免被 reject 误杀）
+        'RULE-SET,reject,REJECT',                          # 广告/追踪域名拦截
+        'RULE-SET,google,{group}',                         # Google 全家桶（含 Antigravity / YouTube / gstatic 等）走代理
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',                # Google gstatic.cn 强制走代理
+        'RULE-SET,ai,{group}',                             # 海外 AI 服务（OpenAI/Claude/Cursor/Copilot/Gemini 等）走代理
+        'RULE-SET,gfw,{group}',                            # GFW 被墙域名（GitHub/X/Reddit/Discord/Linux.do/Steam 商店社区等）走代理
+        'RULE-SET,telegram,{group}',                       # Telegram 域名走代理
+        'DOMAIN-SUFFIX,challenges.cloudflare.com,{group}', # Cloudflare 人机验证走代理，避免与代理站点出口 IP 不一致导致 Turnstile 失败
+        'RULE-SET,telegramcidr,{group},no-resolve',        # Telegram 纯 IP 连接走代理（免 DNS 解析）
+        'MATCH,DIRECT',                                    # 其余全部默认直连（微软/VS Code/Steam 下载/Qoder/Trae/Magpie/国内及可直连海外服务）
+    ],
+    'whitelist': [
+        'RULE-SET,private,DIRECT',
+        'DOMAIN-SUFFIX,gvt2.com,{group}',        # 放行 Google/Chrome 组件下载（避免被 reject 误杀）
+        'DOMAIN,statsig.anthropic.com,{group}',  # 放行 Claude 特性开关（避免被 reject 误杀）
+        'RULE-SET,reject,REJECT',
+        'DOMAIN-SUFFIX,bing.com,DIRECT',         # Bing 国内搜索直连（置于 reject 后保留广告拦截，置于 gfw/proxy 前防走代理）
+        'DOMAIN-SUFFIX,bing.net,DIRECT',         # Bing 静态资源/缩略图 CDN 直连
+        'DOMAIN-SUFFIX,bingapis.com,DIRECT',     # Bing 搜索联想 API 直连
+        'DOMAIN-SUFFIX,bingj.com,DIRECT',        # Bing 网页快照直连
+        'DOMAIN-SUFFIX,steamcontent.com,DIRECT', # Steam 游戏本体/更新核心下载 CDN 直连（防落入 proxy 跑代理流量）
+        'DOMAIN-SUFFIX,steamserver.net,DIRECT',  # Steam 客户端 CM 连接直连（防被误判到海外下载节点）
+        'DOMAIN-SUFFIX,steamchina.com,DIRECT',   # Steam 国区阿里/腾讯/网宿下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
+        'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',  # Steam 国内下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
+        'DOMAIN,steampipe.akamaized.net,DIRECT', # Akamai SteamPipe 游戏内容分发直连
+        'DOMAIN-SUFFIX,qoder.sh,DIRECT',         # Qoder API/OpenAPI 域名直连（阿里云海外节点国内可直连，防 AI 对话跑代理流量）
+        'DOMAIN-SUFFIX,traecdn.us,DIRECT',       # Trae 国际版安装包/静态资源 CDN 直连（防大文件下载/更新走代理兜底）
+        'RULE-SET,icloud,DIRECT',
+        'RULE-SET,apple,DIRECT',
+        'RULE-SET,google,{group}',               # Google 大陆可直连域名强制走代理
+        'DOMAIN-SUFFIX,gstatic.cn,{group}',      # Google gstatic.cn 强制走代理（避免命中 direct 的 +.cn）
+        'RULE-SET,gfw,{group}',                  # 被墙域名走代理（优先于 direct）
+        'RULE-SET,direct,DIRECT',                # 国内网站与微软/驱动/游戏下载 CDN 直连（优先于 proxy 防跑流量）
+        'RULE-SET,proxy,{group}',                # 海外服务走代理（Claude/OpenAI/GitHub/Cursor 等，免本地 DNS 解析）
+        'RULE-SET,lancidr,DIRECT,no-resolve',
+        'RULE-SET,cncidr,DIRECT,no-resolve',
+        'GEOIP,LAN,DIRECT',                      # 解析为私网 IP 的内网域名直连兜底（Mihomo 内置特判 lan，兼容 MMDB/geodata）
+        'GEOIP,CN,DIRECT',
+        'MATCH,{group}',                         # 其余全部走代理（兜底）
+    ],
+}
 
 
 def _fix_stdout():
@@ -195,11 +314,22 @@ def _rule_key(rule):
 
 
 MANAGED_PROVIDER_NAMES = {
-    name
+    item[0]
     for src in RULE_SOURCES.values()
-    for name, _, _ in src['providers']
+    for plist in src['providers'].values()
+    for item in plist
 }
-MANAGED_RULE_KEYS = {_rule_key(t) for t in RULE_TEMPLATES} | {'MATCH', 'FINAL'}
+MANAGED_RULE_KEYS = (
+    {_rule_key(t) for tpls in RULE_TEMPLATES.values() for t in tpls}
+    | {'RULE-SET,' + name.lower() for name in MANAGED_PROVIDER_NAMES}
+    | {'MATCH', 'FINAL'}
+)
+
+
+def _resolve_provider_url(source, cdn, item):
+    override_src = item[3] if len(item) >= 4 and item[3] else source
+    base_key = 'cdn_base' if cdn == 'jsdelivr' else 'raw_base'
+    return RULE_SOURCES[override_src][base_key] + item[1]
 
 
 def _is_direct_or_reject_group(group_obj):
@@ -293,8 +423,8 @@ def inspect_subscription(sub_yaml_path, selected_items):
     return None, dedup_rules, valid_groups
 
 
-def build_merge_cfg(existing_merge, base_url, provider_proxy, source='loyalsoldier'):
-    """基于现有 Merge 配置保留自定义字段，写入 rule-providers，并清理旧版遗留的 rules / Bing DNS。"""
+def build_merge_cfg(existing_merge, cdn, provider_proxy, source='loyalsoldier', mode='hybrid'):
+    """基于现有 Merge 配置保留自定义字段，写入 rule-providers，并清理旧版遗留的 rules / Bing DNS 与其它模式未用规则集。"""
     cfg = dict(existing_merge or {})
     # 移除 Merge 中的 rules，避免覆盖右键「编辑规则」面板（Rules 增强）
     cfg.pop('rules', None)
@@ -320,13 +450,16 @@ def build_merge_cfg(existing_merge, base_url, provider_proxy, source='loyalsoldi
     cfg.setdefault('find-process-mode', 'always')
 
     src_cfg = RULE_SOURCES[source]
-    providers = dict(cfg.get('rule-providers') or {}) if isinstance(cfg.get('rule-providers'), dict) else {}
-    for name, rel_path, behavior in src_cfg['providers']:
+    old_providers = dict(cfg.get('rule-providers') or {}) if isinstance(cfg.get('rule-providers'), dict) else {}
+    # 仅保留用户自定义的非托管 provider，切换模式时自动清理另一模式未使用的托管规则集
+    providers = {k: v for k, v in old_providers.items() if k not in MANAGED_PROVIDER_NAMES}
+    for item in src_cfg['providers'][mode]:
+        name, _rel_path, behavior = item[0], item[1], item[2]
         p = {
             'type': 'http',
             'behavior': behavior,
             'format': src_cfg['format'],
-            'url': base_url + rel_path,
+            'url': _resolve_provider_url(source, cdn, item),
             'path': src_cfg['path_tpl'] % name,
             'interval': 86400,
         }
@@ -338,8 +471,8 @@ def build_merge_cfg(existing_merge, base_url, provider_proxy, source='loyalsoldi
     return cfg
 
 
-def build_rules_cfg(group, sub_rules, existing_rules=None, reset_rules=False):
-    managed_prepend = [t.format(group=group) for t in RULE_TEMPLATES]
+def build_rules_cfg(group, sub_rules, existing_rules=None, reset_rules=False, mode='hybrid'):
+    managed_prepend = [t.format(group=group) for t in RULE_TEMPLATES[mode]]
     custom_prepend = []
     custom_append = []
     if not reset_rules and _is_managed_rules(existing_rules):
@@ -356,6 +489,8 @@ def build_rules_cfg(group, sub_rules, existing_rules=None, reset_rules=False):
         for r in (existing_rules.get('append') or []):
             if not isinstance(r, str) or not r.strip():
                 continue
+            if _rule_key(r) in MANAGED_RULE_KEYS:
+                continue
             if r not in seen_append:
                 seen_append.add(r)
                 custom_append.append(r)
@@ -366,16 +501,18 @@ def build_rules_cfg(group, sub_rules, existing_rules=None, reset_rules=False):
     }, len(custom_prepend) + len(custom_append)
 
 
-def dump_yaml_with_header(cfg, title_line, source_label=None):
+def dump_yaml_with_header(cfg, title_line, source_label=None, mode='hybrid'):
     if source_label is None:
         source_label = RULE_SOURCES['loyalsoldier']['label']
+    mode_label = RULE_MODES.get(mode, mode)
     header = (
         '# ================================================================\n'
         '# %s\n'
+        '# 分流模式: %s\n'
         '# 规则源: %s (RULE-SET，Clash 每日自动更新)\n'
         '# 还原方式: python clash_rebuild_rules.py --restore\n'
         '# ================================================================\n'
-    ) % (title_line, source_label)
+    ) % (title_line, mode_label, source_label)
     body = yaml.safe_dump(
         cfg, sort_keys=False, allow_unicode=True,
         default_flow_style=False, width=1 << 20, indent=2,
@@ -435,10 +572,10 @@ def _render_bar(ratio, width=20, tick=0, fill='█', empty='░'):
     return fill * done + empty * (width - done)
 
 
-def prefetch_rulesets(cfg_dir, source, base_url, no_proxy=False, timeout=30):
-    """将当前规则源的全部规则集预拉取到 Clash Verge 本地 ruleset/ 缓存，并显示终端进度条。"""
+def prefetch_rulesets(cfg_dir, source, cdn, mode='hybrid', no_proxy=False, timeout=30):
+    """将当前规则源与模式的全部规则集预拉取到 Clash Verge 本地 ruleset/ 缓存，并显示终端进度条。"""
     src_cfg = RULE_SOURCES[source]
-    providers = src_cfg['providers']
+    providers = src_cfg['providers'][mode]
     total_count = len(providers)
     is_tty = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
     fill, empty = _bar_chars()
@@ -447,18 +584,19 @@ def prefetch_rulesets(cfg_dir, source, base_url, no_proxy=False, timeout=30):
         if no_proxy else urllib.request.build_opener()
     )
 
-    print('正在拉取规则集（共 %d 份，源: %s）:' % (total_count, src_cfg['label']))
+    print('正在拉取规则集（共 %d 份，模式: %s，源: %s）:' % (total_count, mode, src_cfg['label']))
     total_bytes = 0
     ok_count = 0
     failed = []
     t_all = time.monotonic()
 
-    for idx, (name, rel_path, _behavior) in enumerate(providers, 1):
-        url = base_url + rel_path
+    for idx, item in enumerate(providers, 1):
+        name = item[0]
+        url = _resolve_provider_url(source, cdn, item)
         dst_path = os.path.normpath(os.path.join(cfg_dir, src_cfg['path_tpl'] % name))
         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
         tmp_path = dst_path + '.tmp'
-        prefix = '  [%2d/%d] %-8s' % (idx, total_count, name)
+        prefix = '  [%2d/%d] %-12s' % (idx, total_count, name)
         t0 = time.monotonic()
         last_len = 0
 
@@ -568,6 +706,8 @@ def main():
                     help='手动指定主代理组名（覆盖自动识别；多订阅组名不同时建议配合 --profile 使用）')
     ap.add_argument('--reset-rules', action='store_true',
                     help='重置 Rules 增强为模板默认规则，不保留此前在界面中手工新增的自定义规则')
+    ap.add_argument('--mode', choices=list(RULE_MODES.keys()), default='hybrid',
+                    help='分流模式：hybrid=混合分层(默认，浏览器海外兜底代理+后台程序兜底直连)，blacklist=纯黑名单(MATCH,DIRECT)，whitelist=白名单(MATCH,PROXY)')
     ap.add_argument('--source', choices=list(RULE_SOURCES.keys()), default='loyalsoldier',
                     help='规则集源：loyalsoldier=YAML文本(默认，易排查)，metacubex=Mihomo 二进制 .mrs(体积小、低内存)')
     ap.add_argument('--cdn', choices=['raw', 'jsdelivr'], default='raw',
@@ -614,6 +754,7 @@ def main():
     src_cfg = RULE_SOURCES[args.source]
     base_url = src_cfg['cdn_base'] if args.cdn == 'jsdelivr' else src_cfg['raw_base']
     if not args.restore:
+        print('分流模式: %s' % RULE_MODES[args.mode])
         print('规则集源: %s' % src_cfg['label'])
         print('下载地址: %s' % base_url)
         print('下载经代理: %s\n' % ('否（--no-proxy-download）' if args.no_proxy_download else '是（走各订阅主代理组）'))
@@ -681,18 +822,18 @@ def main():
         provider_proxy = None if args.no_proxy_download else group
         existing_merge = load_yaml_dict(merge_path)
         existing_rules = load_yaml_dict(rules_path)
-        merge_cfg = build_merge_cfg(existing_merge, base_url, provider_proxy, source=args.source)
+        merge_cfg = build_merge_cfg(existing_merge, args.cdn, provider_proxy, source=args.source, mode=args.mode)
         rules_cfg, kept_custom = build_rules_cfg(
-            group, sub_rules, existing_rules=existing_rules, reset_rules=args.reset_rules
+            group, sub_rules, existing_rules=existing_rules, reset_rules=args.reset_rules, mode=args.mode
         )
         if kept_custom:
             print('  已保留界面自定义规则: %d 条（位于模板规则之前，可加 --reset-rules 重置）' % kept_custom)
 
         merge_text = dump_yaml_with_header(
-            merge_cfg, '由 clash_rebuild_rules.py 生成：rule-providers 规则集数据源', src_cfg['label']
+            merge_cfg, '由 clash_rebuild_rules.py 生成：rule-providers 规则集数据源', src_cfg['label'], mode=args.mode
         )
         rules_text = dump_yaml_with_header(
-            rules_cfg, '由 clash_rebuild_rules.py 生成：右键「编辑规则」前置分流规则', src_cfg['label']
+            rules_cfg, '由 clash_rebuild_rules.py 生成：右键「编辑规则」前置分流规则', src_cfg['label'], mode=args.mode
         )
 
         backup_and_write(merge_path, merge_text)
@@ -701,7 +842,7 @@ def main():
         print()
 
     if not args.restore and not args.skip_download and changed > 0:
-        prefetch_rulesets(cfg_dir, args.source, base_url, no_proxy=args.no_proxy_download)
+        prefetch_rulesets(cfg_dir, args.source, args.cdn, mode=args.mode, no_proxy=args.no_proxy_download)
 
     print('=' * 60)
     if args.restore:
