@@ -8,9 +8,10 @@
 对每个远程订阅同时写入两个增强文件（profiles/<uid>.yaml）：
   1. 合并(Merge)增强:
      - rule-providers: 指向 Loyalsoldier/clash-rules (YAML，默认) 或 MetaCubeX/meta-rules-dat (MRS 二进制，--source metacubex) 在线规则集（自动更新，interval=86400s）
+     - find-process-mode: 默认补齐为 always（已有自定义值则保留），让 Clash Verge「连接」页与流量监控插件可识别进程名
      - 保留 Merge 文件中用户原有的其它配置项（如 tun/profile/sniffer 等），并移除旧版遗留的 rules 字段
   2. 规则(Rules)增强（即 Clash Verge 右键订阅 ->「编辑规则」所读写的配置）:
-     - prepend: 完整的分流规则（含 Bing/Steam 下载直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
+     - prepend: 完整的分流规则（含 Bing/Steam/Qoder/Trae CDN 直连、防误杀、RULE-SET、结尾 MATCH 兜底）；重跑时自动保留你在界面中手工新增的自定义规则（加 --reset-rules 可强制重置）
      - delete:  标记删除订阅自带的旧规则（界面上显示删除线，运行时不再冗余保留）
 
 为什么拆成 Merge + Rules 增强
@@ -115,6 +116,8 @@ RULE_TEMPLATES = [
     'DOMAIN-SUFFIX,steamchina.com,DIRECT',   # Steam 国区阿里/腾讯/网宿下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
     'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',  # Steam 国内下载 CDN 直连（补齐 MetaCubeX cn.mrs 缺失）
     'DOMAIN,steampipe.akamaized.net,DIRECT', # Akamai SteamPipe 游戏内容分发直连
+    'DOMAIN-SUFFIX,qoder.sh,DIRECT',         # Qoder API/OpenAPI 域名直连（阿里云海外节点国内可直连，防 AI 对话跑代理流量）
+    'DOMAIN-SUFFIX,traecdn.us,DIRECT',       # Trae 国际版安装包/静态资源 CDN 直连（防大文件下载/更新走代理兜底）
     'RULE-SET,icloud,DIRECT',
     'RULE-SET,apple,DIRECT',
     'RULE-SET,google,{group}',               # Google 大陆可直连域名强制走代理
@@ -312,6 +315,9 @@ def build_merge_cfg(existing_merge, base_url, provider_proxy, source='loyalsoldi
             cfg['dns'] = dns_cfg
         else:
             cfg.pop('dns', None)
+
+    # 默认开启进程识别（已有自定义值则保留），便于连接页与流量监控插件识别进程名
+    cfg.setdefault('find-process-mode', 'always')
 
     src_cfg = RULE_SOURCES[source]
     providers = dict(cfg.get('rule-providers') or {}) if isinstance(cfg.get('rule-providers'), dict) else {}

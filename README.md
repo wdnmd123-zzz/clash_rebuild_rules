@@ -8,8 +8,8 @@
 
 - **一键统一所有订阅的分流规则**：自动扫描 Clash Verge 里的全部远程订阅并识别各自的主代理组，批量换上每日自动更新的在线规则集，不用再逐个手动调整订阅。
 - **国内直连、海外代理，少踩误伤坑**：国内网站、Apple / iCloud、微软更新与驱动下载走直连不绕路；被墙网站与常见海外服务（Google、GitHub、OpenAI、Claude 等）稳定走代理；自带广告拦截，同时放行 Chrome 组件更新与 Claude 功能开关，防止误杀。
-- **Bing 搜索 & Steam 下载直连**：必应默认走国内直连，不再频繁跳国际版；Steam 游戏下载与更新走国内直连、不消耗机场流量，商店和社区仍走代理。
-- **改完还能在界面里直接编辑**：全部生效规则都能在 Clash Verge **「右键订阅 → 编辑规则」** 中直接查看和增删；不覆盖你原有的 DNS 覆盖和 `tun` / `sniffer` 等自定义配置，之后重跑脚本也会自动保留你在界面里手工加过的规则。
+- **Bing 搜索、Steam 与 AI 工具大流量域名直连**：必应默认走国内直连，不再频繁跳国际版；Steam 游戏下载/更新、Qoder API（`qoder.sh`）及 Trae 安装包 CDN（`traecdn.us`）走直连、不消耗机场流量，Steam 商店/社区与 Trae 国际版主服务仍走代理。
+- **改完还能在界面里直接编辑**：全部生效规则都能在 Clash Verge **「右键订阅 → 编辑规则」** 中直接查看和增删；自动补齐 `find-process-mode: always` 以便连接页和流量监控识别进程名，不覆盖你原有的 DNS 覆盖和 `tun` / `sniffer` 等自定义配置，之后重跑脚本也会自动保留你在界面里手工加过的规则。
 - **自动预下载规则集，两种规则源可选**：写入配置时自动把全部 10 份规则集提前拉取到本地缓存（带终端进度条），避免首次启动拉取失败；默认使用方便直接查看排查的 YAML 文本源，也可一键切换为体积仅约 820 KB、启动更快、更省内存的 MetaCubeX 二进制 `.mrs` 源。
 - **首次修改自动备份，随时一键还原**：运行前会自动保存 `.bak` 备份，用着不习惯随时一键还原回原来的配置。
 
@@ -80,7 +80,7 @@ python clash_rebuild_rules.py --restore
 
 1. 运行完成后，打开 **Clash Verge** → 进入 **「订阅（Profiles）」**，点击当前激活的订阅卡片重新加载（或点击右上角重启内核）即可生效。
 2. 在「订阅」页 **右键订阅 →「编辑规则」**：
-   - 顶部无删除线的 **25 条规则** 即为当前生效的完整分流规则；
+   - 顶部无删除线的 **27 条规则** 即为当前生效的完整分流规则；
    - 下方带**红色删除线**的条目是已被屏蔽的机场自带旧规则，运行时不会加载、也不会生效。
 3. **Bing 国内版提示**：
    - 若浏览器此前挂代理访问过必应并缓存了国际版 Cookie，首次切回直连时访问一次 `https://cn.bing.com`（或清除浏览器中 `bing.com` 的 Cookie），后续地址栏默认搜索即可稳定使用国内版必应。
@@ -100,18 +100,19 @@ Clash 按从上到下顺序匹配，**命中第一条即停止**（`{group}` 自
 | 4 | `RULE-SET,reject` | `REJECT` | 广告与追踪域名拦截 |
 | 5–8 | `DOMAIN-SUFFIX,bing.com / bing.net / bingapis.com / bingj.com` | `DIRECT` | Bing 国内搜索、联想 API、静态资源与快照直连 |
 | 9–13 | `DOMAIN-SUFFIX,steamcontent.com / steamserver.net / steamchina.com / st.dl.pinyuncloud.com`、`DOMAIN,steampipe.akamaized.net` | `DIRECT` | Steam 游戏下载/更新 CDN 与 CM 连接直连（商店/社区仍走代理） |
-| 14–15 | `RULE-SET,icloud` / `RULE-SET,apple` | `DIRECT` | iCloud 与 Apple 国内 CDN 直连 |
-| 16–17 | `RULE-SET,google` / `DOMAIN-SUFFIX,gstatic.cn` | `{group}` | Google 大陆可直连域名与 `gstatic.cn` 强制走代理 |
-| 18 | `RULE-SET,gfw` | `{group}` | GFW 被墙域名走代理 |
-| 19 | `RULE-SET,direct` | `DIRECT` | 国内网站与微软 / 游戏 / 驱动下载 CDN 直连 |
-| 20 | `RULE-SET,proxy` | `{group}` | 海外常见服务走代理（Claude / OpenAI / GitHub / Cursor 等） |
-| 21–22 | `RULE-SET,lancidr` / `RULE-SET,cncidr` (`no-resolve`) | `DIRECT` | 局域网与中国大陆 IP 段直连（免 DNS 解析） |
-| 23–24 | `GEOIP,LAN` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
-| 25 | `MATCH` | `{group}` | 其余未命中流量默认走主代理组兜底 |
+| 14–15 | `DOMAIN-SUFFIX,qoder.sh / traecdn.us` | `DIRECT` | Qoder API/OpenAPI 与 Trae 国际版安装包/静态资源 CDN 直连（防大流量落入兜底代理） |
+| 16–17 | `RULE-SET,icloud` / `RULE-SET,apple` | `DIRECT` | iCloud 与 Apple 国内 CDN 直连 |
+| 18–19 | `RULE-SET,google` / `DOMAIN-SUFFIX,gstatic.cn` | `{group}` | Google 大陆可直连域名与 `gstatic.cn` 强制走代理 |
+| 20 | `RULE-SET,gfw` | `{group}` | GFW 被墙域名走代理 |
+| 21 | `RULE-SET,direct` | `DIRECT` | 国内网站与微软 / 游戏 / 驱动下载 CDN 直连 |
+| 22 | `RULE-SET,proxy` | `{group}` | 海外常见服务走代理（Claude / OpenAI / GitHub / Cursor 等） |
+| 23–24 | `RULE-SET,lancidr` / `RULE-SET,cncidr` (`no-resolve`) | `DIRECT` | 局域网与中国大陆 IP 段直连（免 DNS 解析） |
+| 25–26 | `GEOIP,LAN` / `GEOIP,CN` | `DIRECT` | 解析为私网或国内 IP 的域名直连兜底 |
+| 27 | `MATCH` | `{group}` | 其余未命中流量默认走主代理组兜底 |
 
 ### 实现细节
 
-- **Merge + Rules 分离写入**：Merge 增强仅负责提供 `rule-providers`（`interval: 86400`，预拉取到 Clash Verge 的 `ruleset/` 目录），不触碰 `rules` 和 `dns`，从而避免覆盖「编辑规则」面板或与 DNS 覆盖冲突；Rules 增强将以上规则写入 `prepend`，并用 `delete` 屏蔽机场原规则。
+- **Merge + Rules 分离写入**：Merge 增强仅负责提供 `rule-providers`（`interval: 86400`，预拉取到 Clash Verge 的 `ruleset/` 目录）并在未设置时补齐 `find-process-mode: always`，不触碰 `rules` 和 `dns`，从而避免覆盖「编辑规则」面板或与 DNS 覆盖冲突；Rules 增强将以上规则写入 `prepend`，并用 `delete` 屏蔽机场原规则。
 - **为什么采用 `gfw → direct → proxy` 顺序**：先匹配 `gfw` 保证被墙域名走代理，再匹配 `direct` 避免 `proxy.txt` 抢走微软更新、驱动下载、Steam/主机下载 CDN、阿里云等数百条国内直连域名，最后再由 `proxy` 接管其余海外服务。
 - **兼容多分组订阅**：支持 ACL4SSR 等多分组订阅自动识别主代理组，也可通过 `--profile` / `--group` 手动指定。
 

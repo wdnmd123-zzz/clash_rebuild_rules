@@ -94,6 +94,8 @@ $script:RuleTemplates = @(
     'DOMAIN-SUFFIX,steamchina.com,DIRECT',
     'DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT',
     'DOMAIN,steampipe.akamaized.net,DIRECT',
+    'DOMAIN-SUFFIX,qoder.sh,DIRECT',
+    'DOMAIN-SUFFIX,traecdn.us,DIRECT',
     'RULE-SET,icloud,DIRECT',
     'RULE-SET,apple,DIRECT',
     'RULE-SET,google,{group}',
@@ -1423,6 +1425,11 @@ function Build-MergeCfg($ExistingMerge, [string]$BaseUrl, [string]$ProviderProxy
         } else {
             $cfg.Remove('dns')
         }
+    }
+
+    # 默认开启进程识别（已有自定义值则保留），便于连接页与流量监控插件识别进程名
+    if (-not $cfg.Contains('find-process-mode')) {
+        $cfg['find-process-mode'] = 'always'
     }
 
     $srcCfg = $script:RuleSources[$Source]
